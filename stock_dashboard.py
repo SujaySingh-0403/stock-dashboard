@@ -139,54 +139,75 @@ with tab3:
     # Fetch Expiry Dates based on symbol and source
     @st.cache_data(ttl=300)
     def fetch_expiry_dates(symbol, source):
-        if source == "NSE":
-            url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
-            headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
-            res = requests.get(url, headers=headers)
-            if res.status_code == 200:
+        try:
+            if source == "NSE":
+                url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
+                headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+                res = requests.get(url, headers=headers)
+                res.raise_for_status()  # Check for request errors
                 return res.json()["records"]["expiryDates"]
-        elif source == "StockMock":
-            url = f"https://www.stockmock.in/option-chain/{symbol}"
-            res = requests.get(url)
-            if res.status_code == 200:
+            
+            elif source == "StockMock":
+                url = f"https://www.stockmock.in/option-chain/{symbol}"
+                res = requests.get(url)
+                res.raise_for_status()  # Check for request errors
                 soup = BeautifulSoup(res.content, "html.parser")
                 return [opt.text for opt in soup.find_all("option", {"class": "expiry-dates"})]
+        except Exception as e:
+            st.error(f"Error fetching expiry dates: {e}")
         return []
 
     # Get expiry dates
     expiry_dates = fetch_expiry_dates(symbol, data_source)
+    if not expiry_dates:
+        st.warning("No expiry dates found.")
     expiry = st.selectbox("Select Expiry Date", expiry_dates)
 
     # Fetch Option Chain data based on selected symbol, expiry, and source
     @st.cache_data(ttl=300)
     def fetch_option_chain(symbol, expiry, source):
-        if source == "NSE":
-            url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
-            headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
-            res = requests.get(url, headers=headers)
-            if res.status_code == 200:
-                data = res.json()["records"]["data"]
+        try:
+            if source == "NSE":
+                url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
+                headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+                res = requests.get(url, headers=headers)
+                res.raise_for_status()  # Check for request errors
+                data = res.json().get("records", {}).get("data", [])
+                if not data:
+                    st.warning(f"No data found for {symbol} on expiry {expiry}.")
+                    return pd.DataFrame()
+
                 chain = []
                 for d in data:
-                    if d["expiryDate"] == expiry:
-                        strike = d["strikePrice"]
+                    if d.get("expiryDate") == expiry:
+                        strike = d.get("strikePrice")
                         ce = d.get("CE", {})
                         pe = d.get("PE", {})
                         chain.append({
                             "Strike": strike,
-                            "CE_LTP": ce.get("lastPrice"), "CE_IV": ce.get("impliedVolatility"),
-                            "CE_OI": ce.get("openInterest"), "CE_Change_OI": ce.get("changeinOpenInterest"),
-                            "PE_LTP": pe.get("lastPrice"), "PE_IV": pe.get("impliedVolatility"),
-                            "PE_OI": pe.get("openInterest"), "PE_Change_OI": pe.get("changeinOpenInterest")
+                            "CE_LTP": ce.get("lastPrice"),
+                            "CE_IV": ce.get("impliedVolatility"),
+                            "CE_OI": ce.get("openInterest"),
+                            "CE_Change_OI": ce.get("changeinOpenInterest"),
+                            "PE_LTP": pe.get("lastPrice"),
+                            "PE_IV": pe.get("impliedVolatility"),
+                            "PE_OI": pe.get("openInterest"),
+                            "PE_Change_OI": pe.get("changeinOpenInterest")
                         })
                 return pd.DataFrame(chain)
-        elif source == "StockMock":
-            url = f"https://www.stockmock.in/option-chain/{symbol}/{expiry}"
-            res = requests.get(url)
-            if res.status_code == 200:
+            
+            elif source == "StockMock":
+                url = f"https://www.stockmock.in/option-chain/{symbol}/{expiry}"
+                res = requests.get(url)
+                res.raise_for_status()  # Check for request errors
                 soup = BeautifulSoup(res.content, "html.parser")
                 table = soup.find("table", {"id": "option-chain-table"})
+                if not table:
+                    st.warning(f"No data found for {symbol} on expiry {expiry}.")
+                    return pd.DataFrame()
                 return pd.read_html(str(table))[0]
+        except Exception as e:
+            st.error(f"Error fetching option chain: {e}")
         return pd.DataFrame()
 
     # Fetch the option chain data
@@ -199,7 +220,7 @@ with tab3:
             spot = option_chain["Strike"].iloc[(option_chain["Strike"] - option_chain["CE_LTP"]).abs().argsort()[:1]].values[0]
         except:
             spot = option_chain["Strike"].median()
-        
+
         strike_range = st.slider("ATM ± Strikes", 1, 10, 5)
         filtered = option_chain[(option_chain["Strike"] >= spot - strike_range*50) & (option_chain["Strike"] <= spot + strike_range*50)]
         
@@ -219,5 +240,3 @@ with tab3:
         st.dataframe(styled_df, use_container_width=True)
 
     st.caption(f"Data Source: {data_source} | Last Refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-
