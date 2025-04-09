@@ -1,126 +1,91 @@
-# === stock_dashboard.py ===
-
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import ta
-import plotly.graph_objects as go
 import requests
-import time
-from datetime import datetime
 from bs4 import BeautifulSoup
+from datetime import datetime
+from ta.trend import SMAIndicator, EMAIndicator
+from ta.momentum import RSIIndicator
+from ta.volatility import BollingerBands
+from ta.trend import MACD
+from io import StringIO
+import plotly.graph_objs as go
 
-# ========== CONFIG ==========
-st.set_page_config(page_title="📊 Indian Stock Market Dashboard", layout="wide")
+st.set_page_config(page_title="📈 Stock Dashboard", layout="wide")
 
-# ========== SIDEBAR SETTINGS ==========
-st.sidebar.header("🔧 Controls")
+st.title("📊 Indian Stock Market Dashboard")
 
-enable_auto = st.sidebar.checkbox("🔄 Enable Auto Refresh", value=True)
-refresh_interval = st.sidebar.slider("⏱️ Refresh Interval (sec)", 30, 600, 300, step=30)
+# === SIDEBAR ===
+with st.sidebar:
+    st.header("🔁 Auto Refresh")
+    refresh_rate = st.slider("Refresh interval (seconds)", 10, 300, 60)
+    st.caption("⏱️ Refreshes on interval using browser reload")
 
-if st.sidebar.button("🔁 Manual Refresh"):
-    st.rerun()
-if enable_auto:
-    time.sleep(refresh_interval)
-    st.rerun()
+# === AUTO REFRESH ===
+st.markdown(
+    f"""
+    <meta http-equiv="refresh" content="{refresh_rate}">
+    """,
+    unsafe_allow_html=True
+)
 
-# ========== INDEX DATA ==========
-indices = {
-    "NIFTY 50": "^NSEI",
-    "NIFTY BANK": "^NSEBANK",
-    "NIFTY IT": "^CNXIT",
-    "NIFTY FMCG": "^CNXFMCG",
-    "NIFTY AUTO": "^CNXAUTO",
-    "NIFTY METAL": "^CNXMETAL",
-    "NIFTY PHARMA": "^CNXPHARMA",
-    "SENSEX": "^BSESN"
-}
+# === TABS ===
+tab1, tab2, tab3 = st.tabs(["📈 Index Overview", "📘 Watchlist + Technicals", "📘 F&O Overview"])
 
-# ========== MAIN UI ==========
-tab1, tab2, tab3 = st.tabs(["📊 Index Trend", "📈 Watchlist", "📘 F&O Overview"])
-
-# === TAB 1: INDEX TREND ===
+# === TAB 1: INDEX OVERVIEW ===
 with tab1:
-    st.title("📊 Indian Stock Market Dashboard")
-    selected_index_name = st.selectbox("Select Index", list(indices.keys()))
-    selected_index_symbol = indices[selected_index_name]
-    index_data = yf.Ticker(selected_index_symbol).history(period="3mo", interval="1d")
-    st.subheader(f"{selected_index_name} Trend")
-    st.line_chart(index_data["Close"])
+    st.subheader("📈 Index Overview")
+    indices = {
+        "NIFTY 50": "^NSEI",
+        "BANKNIFTY": "^NSEBANK",
+        "SENSEX": "^BSESN",
+        "NIFTY IT": "^CNXIT",
+        "NIFTY AUTO": "^CNXAUTO",
+        "NIFTY FMCG": "^CNXFMCG",
+        "NIFTY METAL": "^CNXMETAL",
+        "NIFTY PHARMA": "^CNXPHARMA",
+        "NIFTY FIN SERVICE": "^CNXFIN",
+        "MIDCAP NIFTY": "^NSEMDCP50"
+    }
 
-# === UTILS ===
-@st.cache_data(ttl=300)
-def fetch_data(symbol, period, interval):
-    ticker = yf.Ticker(f"{symbol}.NS")
-    return ticker.history(period=period, interval=interval)
-
-def add_indicators(df):
-    df["SMA_20"] = ta.trend.sma_indicator(df["Close"], window=20)
-    df["EMA_20"] = ta.trend.ema_indicator(df["Close"], window=20)
-    df["RSI"] = ta.momentum.rsi(df["Close"], window=14)
-    df["MACD"] = ta.trend.macd_diff(df["Close"])
-    bb = ta.volatility.BollingerBands(df["Close"])
-    df["BB_High"] = bb.bollinger_hband()
-    df["BB_Low"] = bb.bollinger_lband()
-    return df
+    index_choice = st.selectbox("Select Index", list(indices.keys()))
+    index_symbol = indices[index_choice]
+    df = yf.download(index_symbol, period="3mo", interval="1d")
+    st.line_chart(df['Close'])
 
 # === TAB 2: WATCHLIST ===
 with tab2:
-    st.subheader("📈 Stock Watchlist")
+    st.subheader("📘 Watchlist + Technical Indicators")
+    watchlist_input = st.text_input("Enter NSE stock symbols (comma separated)", "RELIANCE, TCS, INFY")
+    stocks = [s.strip().upper() for s in watchlist_input.split(",")]
 
-    stocks = st.text_input("Enter comma-separated NSE Stock Symbols", "RELIANCE, TCS, INFY")
-    symbols = [s.strip().upper() for s in stocks.split(",")]
+    for stock in stocks:
+        st.markdown(f"### {stock}")
+        data = yf.download(f"{stock}.NS", period="3mo", interval="1d")
+        if not data.empty:
+            # Indicators
+            data['SMA'] = SMAIndicator(data['Close'], 20).sma_indicator()
+            data['EMA'] = EMAIndicator(data['Close'], 20).ema_indicator()
+            data['RSI'] = RSIIndicator(data['Close']).rsi()
+            bb = BollingerBands(data['Close'])
+            data['BB_Upper'] = bb.bollinger_hband()
+            data['BB_Lower'] = bb.bollinger_lband()
+            macd = MACD(data['Close'])
+            data['MACD'] = macd.macd()
 
-    col1, col2 = st.columns(2)
-    with col1:
-        period = st.selectbox("Select Period", ["1mo", "3mo", "6mo", "1y"], index=1)
-    with col2:
-        interval = st.selectbox("Select Interval", ["1d", "1h", "15m"], index=0)
-
-    for symbol in symbols:
-        st.markdown(f"---\n### 📌 {symbol} – Technical Overview")
-        try:
-            df = fetch_data(symbol, period, interval)
-            if df.empty:
-                st.warning(f"No data for {symbol}")
-                continue
-            df = add_indicators(df)
-            latest = df.iloc[-1]
-
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Current Price", f"₹{latest['Close']:.2f}")
-            c2.metric("Day High", f"₹{latest['High']:.2f}")
-            c3.metric("Day Low", f"₹{latest['Low']:.2f}")
-            c4.metric("Volume", f"{latest['Volume']:,}")
-
-            if latest['RSI'] > 70:
-                st.warning(f"🚨 RSI Overbought: {latest['RSI']:.2f}")
-            elif latest['RSI'] < 30:
-                st.success(f"📉 RSI Oversold: {latest['RSI']:.2f}")
-
-            st.markdown("#### 🕯️ Candlestick with Bollinger Bands")
-            fig = go.Figure(data=[
-                go.Candlestick(x=df.index, open=df["Open"], high=df["High"],
-                               low=df["Low"], close=df["Close"], name="Price"),
-                go.Scatter(x=df.index, y=df["BB_High"], line=dict(color="blue", width=1), name="BB High"),
-                go.Scatter(x=df.index, y=df["BB_Low"], line=dict(color="blue", width=1), name="BB Low"),
-            ])
+            # Plotting
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=data.index, y=data['Close'], name='Close'))
+            fig.add_trace(go.Scatter(x=data.index, y=data['SMA'], name='SMA20'))
+            fig.add_trace(go.Scatter(x=data.index, y=data['EMA'], name='EMA20'))
+            fig.add_trace(go.Scatter(x=data.index, y=data['BB_Upper'], name='BB Upper', line=dict(dash='dot')))
+            fig.add_trace(go.Scatter(x=data.index, y=data['BB_Lower'], name='BB Lower', line=dict(dash='dot')))
             st.plotly_chart(fig, use_container_width=True)
 
-            st.line_chart(df[["Close", "SMA_20", "EMA_20"]].dropna())
-            st.markdown("##### ⚡ RSI")
-            st.line_chart(df[["RSI"]].dropna())
-            st.markdown("##### ⚙️ MACD")
-            st.line_chart(df[["MACD"]].dropna())
+            st.dataframe(data[['Close', 'RSI', 'MACD']].dropna().tail(10))
+        else:
+            st.warning(f"No data for {stock}")
 
-            csv = df.to_csv().encode("utf-8")
-            st.download_button("📥 Download CSV", csv, file_name=f"{symbol}_data.csv", mime="text/csv")
-
-        except Exception as e:
-            st.error(f"❌ Error loading {symbol}: {e}")
-
-# === TAB 3: F&O OVERVIEW ===
 # === TAB 3: F&O OVERVIEW ===
 with tab3:
     st.subheader("📘 F&O Option Chain with Live Greeks")
@@ -187,7 +152,7 @@ with tab3:
                 res = requests.get(url)
                 soup = BeautifulSoup(res.content, "html.parser")
                 table = soup.find("table", {"id": "option-chain-table"})
-                return pd.read_html(str(table))[0]
+                return pd.read_html(StringIO(str(table)))[0]  # ✅ Fixed deprecation warning
             except Exception:
                 return pd.DataFrame()
         return pd.DataFrame()
