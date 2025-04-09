@@ -3,10 +3,30 @@ import pandas as pd
 import yfinance as yf
 import ta
 import plotly.graph_objects as go
+import time
 from datetime import datetime
 
 # ========== CONFIG ==========
 st.set_page_config(page_title="📊 Advanced Indian Stock Dashboard", layout="wide")
+
+REFRESH_INTERVAL = 300  # seconds (5 minutes)
+
+# ========== SIDEBAR: REFRESH CONTROLS ==========
+st.sidebar.header("🔄 Refresh Settings")
+
+enable_auto = st.sidebar.checkbox("Enable Auto Refresh", value=True)
+if st.sidebar.button("🔁 Manual Refresh"):
+    st.experimental_rerun()
+
+# Auto-refresh logic
+if enable_auto:
+    placeholder = st.empty()
+    with placeholder.container():
+        for i in range(REFRESH_INTERVAL, 0, -1):
+            mins, secs = divmod(i, 60)
+            st.sidebar.markdown(f"⏳ Refreshing in **{mins:02d}:{secs:02d}**")
+            time.sleep(1)
+        st.experimental_rerun()
 
 # ========== INDEX DROPDOWN ==========
 indices = {
@@ -111,6 +131,6 @@ for symbol in symbols:
     except Exception as e:
         st.error(f"Error loading data for {symbol}: {e}")
 
-# ========== AUTO REFRESH ==========
+# ========== FOOTER ==========
 st.markdown("---")
-st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} – Auto refresh every 5 minutes.")
+st.caption(f"⏱️ App last refreshed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
