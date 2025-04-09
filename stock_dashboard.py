@@ -140,38 +140,52 @@ with tab2:
             st.error(f"❌ Error loading {symbol}: {e}")
 
 # ========== F&O OVERVIEW TAB ==========
-# ========== TAB 3: F&O OVERVIEW ==========
+# ========== TAB 3: F&O OVERVIEW (NSE Live Data) ==========
 with tab3:
-    st.subheader("📘 Futures & Options Overview")
+    st.subheader("📘 Live F&O Futures Overview (via NSE)")
 
-    fut_symbol = st.selectbox("Select Futures Symbol", ["NIFTY", "BANKNIFTY", "RELIANCE", "TCS", "SBIN"])
-    ticker = yf.Ticker(f"{fut_symbol}.NS")
+    symbol_input = st.selectbox("Select Symbol", ["NIFTY", "BANKNIFTY", "RELIANCE", "TCS", "SBIN"])
+
+    def get_nse_futures_data(symbol="NIFTY"):
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://www.nseindia.com",
+        }
+        session = requests.Session()
+        session.headers.update(headers)
+        session.get("https://www.nseindia.com")  # Set cookies
+
+        url = f"https://www.nseindia.com/api/quote-derivative?symbol={symbol.upper()}"
+        res = session.get(url)
+        data = res.json()
+
+        fut_data = None
+        for item in data['stocks']:
+            if item['metadata']['instrumentType'] in ["FUTIDX", "FUTSTK"]:
+                fut_data = item['metadata']
+                break
+
+        return {
+            "symbol": symbol.upper(),
+            "expiry": fut_data.get("expiryDate"),
+            "price": fut_data.get("lastPrice"),
+            "change": fut_data.get("change"),
+            "changePercent": fut_data.get("pChange"),
+            "volume": fut_data.get("numberOfContractsTraded"),
+            "openInterest": fut_data.get("openInterest")
+        } if fut_data else {}
 
     try:
-        fut_data = ticker.history(period="2mo", interval="1d")
-        fut_data = add_indicators(fut_data)
-        latest = fut_data.iloc[-1]
-
-        st.markdown(f"### {fut_symbol} – Futures Snapshot")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Price", f"₹{latest['Close']:.2f}")
-        c2.metric("Change", f"{((latest['Close'] - latest['Open']) / latest['Open'] * 100):.2f}%")
-        c3.metric("Volume", f"{int(latest['Volume']):,}")
-        c4.metric("RSI", f"{latest['RSI']:.2f}")
-
-        st.markdown("#### 📊 Trend Overview")
-        st.line_chart(fut_data[["Close", "SMA_20", "EMA_20"]].dropna())
-        st.markdown("##### ⚙️ MACD")
-        st.line_chart(fut_data[["MACD"]].dropna())
-
-        # Optional Alerts
-        if latest['RSI'] > 70:
-            st.warning("🔴 Overbought (RSI > 70)")
-        elif latest['RSI'] < 30:
-            st.success("🟢 Oversold (RSI < 30)")
-
+        fut_info = get_nse_futures_data(symbol_input)
+        st.markdown(f"### 🔍 {fut_info['symbol']} Futures Snapshot – Expiry: {fut_info['expiry']}")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("LTP", f"₹{fut_info['price']}")
+        col2.metric("Change %", f"{fut_info['changePercent']}%")
+        col3.metric("Open Interest", f"{fut_info['openInterest']}")
+        st.write(f"📦 Volume Traded: `{fut_info['volume']}`")
     except Exception as e:
-        st.error(f"Failed to fetch data for {fut_symbol}: {e}")
+        st.error(f"❌ Failed to fetch NSE Futures data: {e}")
+
 # ========== TAB 4: OPTION CHAIN WITH GREEKS ==========
 with tab4:
     st.subheader("🧮 F&O Option Chain with Greeks – StockMock")
