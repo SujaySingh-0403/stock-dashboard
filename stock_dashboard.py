@@ -122,8 +122,10 @@ with tab2:
 
 from io import StringIO
 
+
+
 # === TAB 3: F&O OVERVIEW ===
-with tab3:
+with st.expander("📘 F&O Option Chain with Live Greeks", expanded=True):
     st.subheader("📘 F&O Option Chain with Live Greeks")
 
     index_choices = [
@@ -206,6 +208,14 @@ with tab3:
         strike_range = st.slider("ATM ± Strikes", 1, 10, 5)
         filtered = option_chain[(option_chain["Strike"] >= spot - strike_range*50) & (option_chain["Strike"] <= spot + strike_range*50)]
 
+        # Function to highlight specific values
+        def highlight(val, col):
+            if col in ["CE_IV", "PE_IV"] and isinstance(val, (int, float)) and val > 30:
+                return 'background-color: yellow'
+            if col == "Strike" and val == spot:
+                return 'background-color: lightblue'
+            return ''
+
         # Apply highlighting function using `apply`
         st.dataframe(
             filtered.style.apply(lambda x: x.apply(lambda val: highlight(val, x.name)), axis=0),
@@ -213,3 +223,4 @@ with tab3:
         )
 
     st.caption(f"Data Source: {data_source} | Last Refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
