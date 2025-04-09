@@ -16,7 +16,7 @@ tab1, tab2, tab3 = st.tabs(["📈 Technical Dashboard", "📘 Indices", "💰 F&
 stocks = ["RELIANCE.NS", "INFY.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS"]
 selected_symbol = st.sidebar.selectbox("Select Stock", stocks)
 
-# Dropdown for indices
+# Corrected Dropdown for indices
 indices = {
     "NIFTY 50": "^NSEI",
     "NIFTY BANK": "^NSEBANK",
