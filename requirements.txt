@@ -1,8 +1,8 @@
-streamlit
-yfinance
-plotly
-pandas
-requests
-numpy
-streamlit_autorefresh
-ta
+streamlit>=1.31.0
+pandas>=1.5.0
+yfinance>=0.2.18
+ta>=0.11.0
+plotly>=5.18.0
+requests>=2.31.0
+beautifulsoup4>=4.12.2
+lxml>=4.9.3
