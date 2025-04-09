@@ -213,11 +213,14 @@ with tab3:
                 return 'background-color: lightblue'
             return ''
 
-        st.dataframe(
-            filtered.style.applymap(lambda val: highlight(val, "CE_IV"), subset=["CE_IV"])
-                            .applymap(lambda val: highlight(val, "PE_IV"), subset=["PE_IV"])
-                            .applymap(lambda val: highlight(val, "Strike"), subset=["Strike"]),
-            use_container_width=True
-        )
+            # Option Chain display
+            st.dataframe(
+                    filtered.style
+                            .map(lambda val: highlight(val, "CE_IV"), subset=["CE_IV"])
+                            .map(lambda val: highlight(val, "PE_IV"), subset=["PE_IV"])
+                            .map(lambda val: highlight(val, "Strike"), subset=["Strike"]),
+                    use_container_width=True
+            )
+
 
     st.caption(f"Data Source: {data_source} | Last Refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
