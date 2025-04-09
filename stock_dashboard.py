@@ -120,7 +120,8 @@ with tab2:
         except Exception as e:
             st.error(f"❌ Error loading {symbol}: {e}")
 
-# === TAB 3: F&O OVERVIEW ===
+from io import StringIO
+
 # === TAB 3: F&O OVERVIEW ===
 with tab3:
     st.subheader("📘 F&O Option Chain with Live Greeks")
@@ -187,7 +188,10 @@ with tab3:
                 res = requests.get(url)
                 soup = BeautifulSoup(res.content, "html.parser")
                 table = soup.find("table", {"id": "option-chain-table"})
-                return pd.read_html(str(table))[0]
+                
+                # Fixing the deprecation warning by using StringIO
+                table_html = str(table)
+                return pd.read_html(StringIO(table_html))[0]
             except Exception:
                 return pd.DataFrame()
         return pd.DataFrame()
