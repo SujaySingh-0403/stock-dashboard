@@ -136,26 +136,48 @@ with tab3:
     # Source toggle for data (NSE or StockMock)
     data_source = st.radio("Select Data Source", ["NSE", "StockMock"], index=0)
 
-    # Fetch Expiry Dates based on symbol and source
-    @st.cache_data(ttl=300)
-    def fetch_expiry_dates(symbol, source):
-        try:
-            if source == "NSE":
-                url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
-                headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
-                res = requests.get(url, headers=headers)
-                res.raise_for_status()  # Check for request errors
-                return res.json()["records"]["expiryDates"]
+import requests
+from bs4 import BeautifulSoup
+
+# Fetch Expiry Dates based on symbol and source with enhanced headers
+@st.cache_data(ttl=300)
+def fetch_expiry_dates(symbol, source):
+    try:
+        if source == "NSE":
+            url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
             
-            elif source == "StockMock":
-                url = f"https://www.stockmock.in/option-chain/{symbol}"
-                res = requests.get(url)
-                res.raise_for_status()  # Check for request errors
-                soup = BeautifulSoup(res.content, "html.parser")
-                return [opt.text for opt in soup.find_all("option", {"class": "expiry-dates"})]
-        except Exception as e:
-            st.error(f"Error fetching expiry dates: {e}")
-        return []
+            # Enhanced headers to simulate a browser request
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Accept": "application/json",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Connection": "keep-alive",
+                "Cache-Control": "max-age=0",
+                "TE": "Trailers"
+            }
+            
+            # Create a session to handle cookies
+            session = requests.Session()
+            session.headers.update(headers)
+            res = session.get(url)
+            
+            # Ensure we handle failed requests
+            res.raise_for_status()  # Raise error for bad responses
+            return res.json()["records"]["expiryDates"]
+
+        elif source == "StockMock":
+            url = f"https://www.stockmock.in/option-chain/{symbol}"
+            res = requests.get(url)
+            res.raise_for_status()  # Check for request errors
+            soup = BeautifulSoup(res.content, "html.parser")
+            return [opt.text for opt in soup.find_all("option", {"class": "expiry-dates"})]
+
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching expiry dates: {e}")
+    except KeyError:
+        st.error(f"Failed to parse expiry dates for {symbol}.")
+    return []
+
 
     # Get expiry dates
     expiry_dates = fetch_expiry_dates(symbol, data_source)
