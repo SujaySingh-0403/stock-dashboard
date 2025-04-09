@@ -5,6 +5,9 @@ import ta
 import plotly.graph_objects as go
 import time
 from datetime import datetime
+from bs4 import BeautifulSoup
+import requests
+
 
 # ========== CONFIG ==========
 st.set_page_config(page_title="📊 Indian Stock Market Dashboard", layout="wide")
@@ -35,7 +38,13 @@ indices = {
 }
 
 # ========== MAIN UI ==========
-tab1, tab2, tab3 = st.tabs(["📊 Index Trend", "📈 Watchlist", "📘 F&O Overview"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📊 Index Trend",
+    "📈 Watchlist",
+    "📘 F&O Overview",
+    "🧮 Option Chain"
+])
+
 
 # ========== INDEX TAB ==========
 with tab1:
@@ -131,9 +140,89 @@ with tab2:
             st.error(f"❌ Error loading {symbol}: {e}")
 
 # ========== F&O OVERVIEW TAB ==========
+# ========== TAB 3: F&O OVERVIEW ==========
 with tab3:
-    st.subheader("📘 F&O Data (Coming Soon)")
-    st.info("Option Chain, IV, OI Analysis, Strategy Builder – under development.")
+    st.subheader("📘 Futures & Options Overview")
+
+    fut_symbol = st.selectbox("Select Futures Symbol", ["NIFTY", "BANKNIFTY", "RELIANCE", "TCS", "SBIN"])
+    ticker = yf.Ticker(f"{fut_symbol}.NS")
+
+    try:
+        fut_data = ticker.history(period="2mo", interval="1d")
+        fut_data = add_indicators(fut_data)
+        latest = fut_data.iloc[-1]
+
+        st.markdown(f"### {fut_symbol} – Futures Snapshot")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Price", f"₹{latest['Close']:.2f}")
+        c2.metric("Change", f"{((latest['Close'] - latest['Open']) / latest['Open'] * 100):.2f}%")
+        c3.metric("Volume", f"{int(latest['Volume']):,}")
+        c4.metric("RSI", f"{latest['RSI']:.2f}")
+
+        st.markdown("#### 📊 Trend Overview")
+        st.line_chart(fut_data[["Close", "SMA_20", "EMA_20"]].dropna())
+        st.markdown("##### ⚙️ MACD")
+        st.line_chart(fut_data[["MACD"]].dropna())
+
+        # Optional Alerts
+        if latest['RSI'] > 70:
+            st.warning("🔴 Overbought (RSI > 70)")
+        elif latest['RSI'] < 30:
+            st.success("🟢 Oversold (RSI < 30)")
+
+    except Exception as e:
+        st.error(f"Failed to fetch data for {fut_symbol}: {e}")
+# ========== TAB 4: OPTION CHAIN WITH GREEKS ==========
+with tab4:
+    st.subheader("🧮 F&O Option Chain with Greeks – StockMock")
+
+    instrument = st.selectbox("Select Instrument", ["NIFTY", "BANKNIFTY"])
+    url = f"https://www.stockmock.in/option-chain/{instrument.lower()}/weekly"
+
+    try:
+        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        soup = BeautifulSoup(res.text, "html.parser")
+
+        # ATM Strike
+        atm_tag = soup.find("span", {"class": "atmStrike"})
+        atm_strike = int(atm_tag.text.strip()) if atm_tag else 0
+
+        # Option Chain Table
+        table = soup.find("table")
+        headers = [th.text.strip() for th in table.find("thead").find_all("th")]
+        rows = []
+        for tr in table.find("tbody").find_all("tr"):
+            cells = [td.text.strip().replace(',', '') for td in tr.find_all("td")]
+            if len(cells) == len(headers):
+                rows.append(dict(zip(headers, cells)))
+
+        df_oc = pd.DataFrame(rows)
+
+        # Convert numeric
+        for col in df_oc.columns:
+            try:
+                df_oc[col] = pd.to_numeric(df_oc[col])
+            except:
+                pass
+
+        # Filter strikes ±500
+        st.markdown(f"📍 ATM Strike: **{atm_strike}**")
+        lower, upper = atm_strike - 500, atm_strike + 500
+        df_oc = df_oc[(df_oc["Strike"] >= lower) & (df_oc["Strike"] <= upper)]
+
+        # Display table
+        st.dataframe(df_oc.style
+            .highlight_max(axis=0, color="lightgreen")
+            .highlight_min(axis=0, color="salmon"),
+            use_container_width=True)
+
+        # Download
+        csv_oc = df_oc.to_csv(index=False).encode()
+        st.download_button("📥 Download Option Chain CSV", csv_oc, file_name=f"{instrument}_option_chain.csv")
+
+    except Exception as e:
+        st.error(f"❌ Failed to fetch Option Chain: {e}")
+
 
 # ========== FOOTER ==========
 st.markdown("---")
