@@ -7,28 +7,22 @@ import time
 from datetime import datetime
 
 # ========== CONFIG ==========
-st.set_page_config(page_title="📊 Advanced Indian Stock Dashboard", layout="wide")
+st.set_page_config(page_title="📊 Indian Stock Market Dashboard", layout="wide")
 
-REFRESH_INTERVAL = 300  # seconds (5 minutes)
+# ========== SIDEBAR SETTINGS ==========
+st.sidebar.header("🔧 Controls")
 
-# ========== SIDEBAR: REFRESH CONTROLS ==========
-st.sidebar.header("🔄 Refresh Settings")
+enable_auto = st.sidebar.checkbox("🔄 Enable Auto Refresh", value=True)
+refresh_interval = st.sidebar.slider("⏱️ Refresh Interval (sec)", 30, 600, 300, step=30)
 
-enable_auto = st.sidebar.checkbox("Enable Auto Refresh", value=True)
 if st.sidebar.button("🔁 Manual Refresh"):
     st.experimental_rerun()
 
-# Auto-refresh logic
 if enable_auto:
-    placeholder = st.empty()
-    with placeholder.container():
-        for i in range(REFRESH_INTERVAL, 0, -1):
-            mins, secs = divmod(i, 60)
-            st.sidebar.markdown(f"⏳ Refreshing in **{mins:02d}:{secs:02d}**")
-            time.sleep(1)
-        st.experimental_rerun()
+    time.sleep(refresh_interval)
+    st.experimental_rerun()
 
-# ========== INDEX DROPDOWN ==========
+# ========== INDEX DATA ==========
 indices = {
     "NIFTY 50": "^NSEI",
     "NIFTY BANK": "^NSEBANK",
@@ -40,97 +34,107 @@ indices = {
     "SENSEX": "^BSESN"
 }
 
-st.title("📊 Indian Stock Market Dashboard with Indicators & Tools")
-selected_index_name = st.selectbox("Select Index", list(indices.keys()))
-selected_index_symbol = indices[selected_index_name]
+# ========== MAIN UI ==========
+tab1, tab2, tab3 = st.tabs(["📊 Index Trend", "📈 Watchlist", "📘 F&O Overview"])
 
-# ========== STOCK INPUT ==========
-stocks = st.text_input("Enter comma-separated NSE Stock Symbols", "RELIANCE, TCS, INFY")
-symbols = [s.strip().upper() for s in stocks.split(',')]
+# ========== INDEX TAB ==========
+with tab1:
+    st.title("📊 Indian Stock Market Dashboard")
+    selected_index_name = st.selectbox("Select Index", list(indices.keys()))
+    selected_index_symbol = indices[selected_index_name]
 
-# ========== OPTIONS ==========
-col1, col2 = st.columns(2)
-with col1:
-    period = st.selectbox("Select Period", ["1mo", "3mo", "6mo", "1y", "2y"], index=1)
-with col2:
-    interval = st.selectbox("Select Interval", ["1d", "1h", "15m"], index=0)
+    index_data = yf.Ticker(selected_index_symbol).history(period="3mo", interval="1d")
+    st.subheader(f"{selected_index_name} Trend")
+    st.line_chart(index_data["Close"])
 
-# ========== FETCH DATA ==========
+# ========== FETCH UTILS ==========
 @st.cache_data(ttl=300)
 def fetch_data(symbol, period, interval):
     ticker = yf.Ticker(f"{symbol}.NS")
     return ticker.history(period=period, interval=interval)
 
 def add_indicators(df):
-    df['SMA_20'] = ta.trend.sma_indicator(df['Close'], window=20)
-    df['EMA_20'] = ta.trend.ema_indicator(df['Close'], window=20)
-    df['RSI'] = ta.momentum.rsi(df['Close'], window=14)
-    df['MACD'] = ta.trend.macd_diff(df['Close'])
-    bb = ta.volatility.BollingerBands(df['Close'])
-    df['BB_High'] = bb.bollinger_hband()
-    df['BB_Low'] = bb.bollinger_lband()
+    df["SMA_20"] = ta.trend.sma_indicator(df["Close"], window=20)
+    df["EMA_20"] = ta.trend.ema_indicator(df["Close"], window=20)
+    df["RSI"] = ta.momentum.rsi(df["Close"], window=14)
+    df["MACD"] = ta.trend.macd_diff(df["Close"])
+    bb = ta.volatility.BollingerBands(df["Close"])
+    df["BB_High"] = bb.bollinger_hband()
+    df["BB_Low"] = bb.bollinger_lband()
     return df
 
-# ========== DISPLAY INDEX ==========
-with st.expander(f"📈 {selected_index_name} Trend"):
-    index_data = fetch_data(selected_index_symbol, period="3mo", interval="1d")
-    st.line_chart(index_data['Close'])
+# ========== WATCHLIST TAB ==========
+with tab2:
+    st.subheader("📈 Stock Watchlist")
 
-# ========== MAIN LOOP ==========
-for symbol in symbols:
-    st.subheader(f"📌 {symbol} – Technical Analysis")
-    try:
-        df = fetch_data(symbol, period, interval)
-        if df.empty:
-            st.warning(f"No data for {symbol}")
-            continue
+    stocks = st.text_input("Enter comma-separated NSE Stock Symbols", "RELIANCE, TCS, INFY")
+    symbols = [s.strip().upper() for s in stocks.split(",")]
 
-        df = add_indicators(df)
+    col1, col2 = st.columns(2)
+    with col1:
+        period = st.selectbox("Select Period", ["1mo", "3mo", "6mo", "1y", "2y"], index=1)
+    with col2:
+        interval = st.selectbox("Select Interval", ["1d", "1h", "15m"], index=0)
 
-        latest = df.iloc[-1]
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Current Price", f"₹{latest['Close']:.2f}")
-        col2.metric("Day High", f"₹{latest['High']:.2f}")
-        col3.metric("Day Low", f"₹{latest['Low']:.2f}")
-        col4.metric("Volume", f"{latest['Volume']:,}")
+    for symbol in symbols:
+        st.markdown(f"---\n### 📌 {symbol} – Technical Overview")
+        try:
+            df = fetch_data(symbol, period, interval)
+            if df.empty:
+                st.warning(f"No data for {symbol}")
+                continue
 
-        # ========== CANDLESTICK ==========
-        st.markdown("### 🕯️ Candlestick Chart with Bollinger Bands")
-        fig = go.Figure(data=[
-            go.Candlestick(
-                x=df.index,
-                open=df['Open'],
-                high=df['High'],
-                low=df['Low'],
-                close=df['Close'],
-                name="Price"
-            ),
-            go.Scatter(x=df.index, y=df['BB_High'], line=dict(color='blue', width=1), name='BB High'),
-            go.Scatter(x=df.index, y=df['BB_Low'], line=dict(color='blue', width=1), name='BB Low')
-        ])
-        st.plotly_chart(fig, use_container_width=True)
+            df = add_indicators(df)
+            latest = df.iloc[-1]
 
-        # ========== PRICE + MA ==========
-        st.line_chart(df[['Close', 'SMA_20', 'EMA_20']].dropna())
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Current Price", f"₹{latest['Close']:.2f}")
+            c2.metric("Day High", f"₹{latest['High']:.2f}")
+            c3.metric("Day Low", f"₹{latest['Low']:.2f}")
+            c4.metric("Volume", f"{latest['Volume']:,}")
 
-        # ========== RSI ==========
-        st.markdown("### ⚡ RSI (Relative Strength Index)")
-        st.line_chart(df[['RSI']].dropna())
+            # Alerts
+            if latest['RSI'] > 70:
+                st.warning(f"🚨 RSI Overbought: {latest['RSI']:.2f}")
+            elif latest['RSI'] < 30:
+                st.success(f"📉 RSI Oversold: {latest['RSI']:.2f}")
 
-        # ========== MACD ==========
-        st.markdown("### ⚙️ MACD (Moving Average Convergence Divergence)")
-        st.line_chart(df[['MACD']].dropna())
+            if latest["MACD"] > 0 and df["MACD"].iloc[-2] < 0:
+                st.info("📈 MACD Bullish Crossover Detected")
+            elif latest["MACD"] < 0 and df["MACD"].iloc[-2] > 0:
+                st.error("📉 MACD Bearish Crossover Detected")
 
-        # ========== DOWNLOAD ==========
-        csv = df.to_csv().encode('utf-8')
-        st.download_button("📥 Download CSV", csv, file_name=f"{symbol}_data.csv", mime='text/csv')
+            # Candlestick + Bollinger
+            st.markdown("#### 🕯️ Candlestick with Bollinger Bands")
+            fig = go.Figure(data=[
+                go.Candlestick(
+                    x=df.index, open=df["Open"], high=df["High"],
+                    low=df["Low"], close=df["Close"], name="Price"
+                ),
+                go.Scatter(x=df.index, y=df["BB_High"], line=dict(color="blue", width=1), name="BB High"),
+                go.Scatter(x=df.index, y=df["BB_Low"], line=dict(color="blue", width=1), name="BB Low"),
+            ])
+            st.plotly_chart(fig, use_container_width=True)
 
-        # ========== ALERT PLACEHOLDER ==========
-        st.info("🔔 Alerts coming soon: Set price/indicator-based email/Telegram alerts.")
+            # Price + MA
+            st.line_chart(df[["Close", "SMA_20", "EMA_20"]].dropna())
+            st.markdown("##### ⚡ RSI")
+            st.line_chart(df[["RSI"]].dropna())
+            st.markdown("##### ⚙️ MACD")
+            st.line_chart(df[["MACD"]].dropna())
 
-    except Exception as e:
-        st.error(f"Error loading data for {symbol}: {e}")
+            # Download
+            csv = df.to_csv().encode("utf-8")
+            st.download_button("📥 Download CSV", csv, file_name=f"{symbol}_data.csv", mime="text/csv")
+
+        except Exception as e:
+            st.error(f"❌ Error loading {symbol}: {e}")
+
+# ========== F&O OVERVIEW TAB ==========
+with tab3:
+    st.subheader("📘 F&O Data (Coming Soon)")
+    st.info("Option Chain, IV, OI Analysis, Strategy Builder – under development.")
 
 # ========== FOOTER ==========
 st.markdown("---")
-st.caption(f"⏱️ App last refreshed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+st.caption(f"⏱️ Last Refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
