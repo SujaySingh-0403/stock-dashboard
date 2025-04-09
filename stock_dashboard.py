@@ -62,18 +62,29 @@ with tab1:
     index_symbol = index_map[index_choice]
 
     def get_nse_index_data(index_symbol="NIFTY"):
+        import requests
+
         headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://www.nseindia.com"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.nseindia.com/",
+            "Connection": "keep-alive",
         }
+
         session = requests.Session()
         session.headers.update(headers)
+
+        # First hit to get cookies
         session.get("https://www.nseindia.com")
 
         url = f"https://www.nseindia.com/api/equity-stockIndices?index={index_symbol}"
-        res = session.get(url)
-        data = res.json()
+        response = session.get(url, timeout=10)
 
+        if response.status_code != 200:
+            raise Exception(f"Error: {response.status_code} from NSE")
+
+        data = response.json()
         return data.get("data")[0] if "data" in data and data["data"] else {}
 
     try:
@@ -95,6 +106,7 @@ with tab1:
 
     except Exception as e:
         st.error(f"❌ Failed to fetch NSE Index data: {e}")
+
 
 
 # ========== WATCHLIST TAB ==========
