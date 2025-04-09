@@ -206,21 +206,10 @@ with tab3:
         strike_range = st.slider("ATM ± Strikes", 1, 10, 5)
         filtered = option_chain[(option_chain["Strike"] >= spot - strike_range*50) & (option_chain["Strike"] <= spot + strike_range*50)]
 
-        def highlight(val, col):
-            if col in ["CE_IV", "PE_IV"] and isinstance(val, (int, float)) and val > 30:
-                return 'background-color: yellow'
-            if col == "Strike" and val == spot:
-                return 'background-color: lightblue'
-            return ''
-
-            # Option Chain display
-            st.dataframe(
-                    filtered.style
-                            .map(lambda val: highlight(val, "CE_IV"), subset=["CE_IV"])
-                            .map(lambda val: highlight(val, "PE_IV"), subset=["PE_IV"])
-                            .map(lambda val: highlight(val, "Strike"), subset=["Strike"]),
-                    use_container_width=True
-            )
-
+        # Apply highlighting function using `apply`
+        st.dataframe(
+            filtered.style.apply(lambda x: x.apply(lambda val: highlight(val, x.name)), axis=0),
+            use_container_width=True
+        )
 
     st.caption(f"Data Source: {data_source} | Last Refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
