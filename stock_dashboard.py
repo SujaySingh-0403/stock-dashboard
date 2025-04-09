@@ -1,66 +1,22 @@
 import streamlit as st
+import yfinance as yf
 import pandas as pd
 import requests
-import yfinance as yf
-import ta
-import plotly.graph_objects as go
-import time
-from datetime import datetime
-from bs4 import BeautifulSoup
-from typing import List
+from streamlit_option_menu import option_menu
 
-# ========== CONFIG ==========
-st.set_page_config(page_title="📊 Indian Stock Market Dashboard", layout="wide")
+st.set_page_config(layout="wide", page_title="📊 Stock Market Dashboard")
 
-# ========== HEADERS FOR NSE SCRAPING ==========
-def nse_headers():
-    return {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.nseindia.com/"
-    }
+# Title
+st.title("📊 Live Stock Market Dashboard")
 
-# ========== NSE OPTION CHAIN FETCH ==========
-@st.cache_data(ttl=300)
-def fetch_option_chain(symbol: str):
-    session = requests.Session()
-    base_url = "https://www.nseindia.com"
+# Tabs
+tab1, tab2, tab3 = st.tabs(["📈 Technical Dashboard", "📘 Indices", "💰 F&O Option Chain"])
 
-    # Determine endpoint
-    if symbol.upper() in ["NIFTY", "BANKNIFTY"]:
-        url = f"{base_url}/api/option-chain-indices?symbol={symbol.upper()}"
-    else:
-        url = f"{base_url}/api/option-chain-equities?symbol={symbol.upper()}"
+# Dropdown for stock symbols
+stocks = ["RELIANCE.NS", "INFY.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS"]
+selected_symbol = st.sidebar.selectbox("Select Stock", stocks)
 
-    try:
-        # Preload cookies
-        session.get(base_url, headers=nse_headers(), timeout=5)
-        response = session.get(url, headers=nse_headers(), timeout=5)
-        data = response.json()
-        records = data["records"]
-        expiry_dates = records["expiryDates"]
-        underlying = records["underlyingValue"]
-        df = pd.json_normalize(records["data"], sep="_")
-        return df, expiry_dates, underlying
-    except Exception as e:
-        st.error(f"Error fetching option chain: {e}")
-        return pd.DataFrame(), [], 0
-
-# ========== SIDEBAR ==========
-st.sidebar.header("🔧 Controls")
-
-enable_auto = st.sidebar.checkbox("🔄 Enable Auto Refresh", value=False)
-refresh_interval = st.sidebar.slider("⏱️ Refresh Interval (sec)", 30, 600, 300, step=30)
-
-if st.sidebar.button("🔁 Manual Refresh"):
-    st.rerun()
-
-if enable_auto:
-    time.sleep(refresh_interval)
-    st.rerun()
-
-# ========== INDEX DATA ==========
+# Dropdown for indices
 indices = {
     "NIFTY 50": "^NSEI",
     "NIFTY BANK": "^NSEBANK",
@@ -69,108 +25,102 @@ indices = {
     "NIFTY AUTO": "^CNXAUTO",
     "SENSEX": "^BSESN"
 }
+selected_index_name = st.sidebar.selectbox("Select Index", list(indices.keys()))
+selected_index_symbol = indices[selected_index_name]
 
-# ========== MAIN TABS ==========
-tab1, tab2, tab3 = st.tabs(["📊 Index Trend", "📈 Watchlist", "📘 F&O Overview"])
+# Function to get price data with error handling
+def get_price_data(symbol, period="3mo", interval="1d"):
+    try:
+        ticker = yf.Ticker(symbol)
+        data = ticker.history(period=period, interval=interval)
+        if data.empty:
+            st.warning(f"⚠️ No data found for {symbol}. It may be an invalid or delisted symbol.")
+            return None
+        return data
+    except Exception as e:
+        st.error(f"❌ Failed to fetch data for {symbol}: {e}")
+        return None
 
-# ========== INDEX TREND TAB ==========
+# TAB 1 - Technical Dashboard
 with tab1:
-    st.title("📊 Indian Stock Market Dashboard")
-    selected_index_name = st.selectbox("Select Index", list(indices.keys()))
-    selected_index_symbol = indices[selected_index_name]
-    index_data = yf.Ticker(selected_index_symbol).history(period="3mo", interval="1d")
-    st.subheader(f"{selected_index_name} Trend")
-    st.line_chart(index_data["Close"])
+    st.subheader(f"📈 Technical Chart for {selected_symbol}")
+    data = get_price_data(selected_symbol)
 
-# ========== WATCHLIST UTILS ==========
-@st.cache_data(ttl=300)
-def fetch_data(symbol, period, interval):
-    ticker = yf.Ticker(f"{symbol}.NS")
-    return ticker.history(period=period, interval=interval)
+    if data is not None:
+        st.line_chart(data["Close"])
 
-@st.cache_data(ttl=300)
-def add_indicators(df):
-    df["SMA_20"] = ta.trend.sma_indicator(df["Close"], window=20)
-    df["EMA_20"] = ta.trend.ema_indicator(df["Close"], window=20)
-    df["RSI"] = ta.momentum.rsi(df["Close"], window=14)
-    df["MACD"] = ta.trend.macd_diff(df["Close"])
-    bb = ta.volatility.BollingerBands(df["Close"])
-    df["BB_High"] = bb.bollinger_hband()
-    df["BB_Low"] = bb.bollinger_lband()
-    return df
-
-# ========== WATCHLIST TAB ==========
+# TAB 2 - Index Overview
 with tab2:
-    st.subheader("📈 Stock Watchlist")
-    stocks = st.text_input("Enter comma-separated NSE Stock Symbols", "RELIANCE, TCS, INFY")
-    symbols = [s.strip().upper() for s in stocks.split(",")]
+    st.subheader(f"📘 Index Chart: {selected_index_name}")
+    index_data = get_price_data(selected_index_symbol)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        period = st.selectbox("Select Period", ["1mo", "3mo", "6mo", "1y", "2y"], index=1)
-    with col2:
-        interval = st.selectbox("Select Interval", ["1d", "1h", "15m"], index=0)
+    if index_data is not None:
+        st.line_chart(index_data["Close"])
 
-    for symbol in symbols:
-        st.markdown(f"---\n### 📌 {symbol} – Technical Overview")
-        try:
-            df = fetch_data(symbol, period, interval)
-            if df.empty:
-                st.warning(f"No data for {symbol}")
-                continue
+# TAB 3 - F&O Option Chain (NSE Live)
+def get_option_chain(symbol, is_index=True):
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9"
+    }
+    base_url = "https://www.nseindia.com"
+    url = f"{base_url}/api/option-chain-{'indices' if is_index else 'equities'}?symbol={symbol}"
 
-            df = add_indicators(df)
-            latest = df.iloc[-1]
+    try:
+        session = requests.Session()
+        session.get(base_url, headers=headers)
+        response = session.get(url, headers=headers)
 
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Current Price", f"₹{latest['Close']:.2f}")
-            c2.metric("Day High", f"₹{latest['High']:.2f}")
-            c3.metric("Day Low", f"₹{latest['Low']:.2f}")
-            c4.metric("Volume", f"{latest['Volume']:,}")
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Failed to fetch option chain data. Status code: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"❌ NSE scraping error: {e}")
+        return None
 
-            if latest['RSI'] > 70:
-                st.warning(f"🚨 RSI Overbought: {latest['RSI']:.2f}")
-            elif latest['RSI'] < 30:
-                st.success(f"📉 RSI Oversold: {latest['RSI']:.2f}")
-
-            st.line_chart(df[["Close", "SMA_20", "EMA_20"]].dropna())
-            st.line_chart(df[["RSI"]].dropna())
-            st.line_chart(df[["MACD"]].dropna())
-
-        except Exception as e:
-            st.error(f"❌ Error loading {symbol}: {e}")
-
-# ========== F&O OVERVIEW TAB ==========
 with tab3:
-    st.subheader("📘 F&O Option Chain with Live Greeks")
+    st.subheader("💰 Option Chain Data (NSE Live)")
+    option_symbols = list(indices.keys()) + [s.split(".")[0] for s in stocks]
+    oc_selection = st.selectbox("Select F&O Symbol (Index or Stock)", option_symbols)
 
-    symbol = st.text_input("Enter Symbol (e.g. NIFTY, BANKNIFTY, RELIANCE)", "NIFTY")
-    df, expiries, underlying = fetch_option_chain(symbol.upper())
+    is_index = oc_selection in indices
+    oc_symbol = indices[oc_selection] if is_index else oc_selection
 
-    if not df.empty:
-        expiry = st.selectbox("Select Expiry Date", expiries)
-        atm_range = st.slider("ATM ± Strikes", 2, 20, 10)
+    data = get_option_chain(oc_symbol, is_index=is_index)
 
-        df = df[df["expiryDate"] == expiry]
-        df = df.sort_values("strikePrice")
-        atm_strike = df.iloc[(df["strikePrice"] - underlying).abs().argsort()].iloc[0]["strikePrice"]
-        min_strike = atm_strike - atm_range * 50
-        max_strike = atm_strike + atm_range * 50
-        df_filtered = df[(df["strikePrice"] >= min_strike) & (df["strikePrice"] <= max_strike)]
+    if data:
+        ce_data = []
+        pe_data = []
+        records = data["records"]
+        expiry = records.get("expiryDates", [])[0]
 
-        st.write(f"Underlying: {underlying} | ATM Strike: {atm_strike}")
+        for item in records["data"]:
+            strike = item["strikePrice"]
+            ce = item.get("CE", {}).get("expiryDate") == expiry and item.get("CE")
+            pe = item.get("PE", {}).get("expiryDate") == expiry and item.get("PE")
 
-        oc_table = pd.DataFrame({
-            "Strike": df_filtered["strikePrice"],
-            "CE LTP": df_filtered["CE_lastPrice"].fillna("-"),
-            "CE IV": df_filtered["CE_impliedVolatility"].fillna("-"),
-            "CE OI": df_filtered["CE_openInterest"].fillna("-"),
-            "PE LTP": df_filtered["PE_lastPrice"].fillna("-"),
-            "PE IV": df_filtered["PE_impliedVolatility"].fillna("-"),
-            "PE OI": df_filtered["PE_openInterest"].fillna("-"),
-        })
-        st.dataframe(oc_table, use_container_width=True)
+            if ce:
+                ce_data.append({
+                    "Strike": strike,
+                    "IV": ce.get("impliedVolatility"),
+                    "LTP": ce.get("lastPrice"),
+                    "OI": ce.get("openInterest")
+                })
+            if pe:
+                pe_data.append({
+                    "Strike": strike,
+                    "IV": pe.get("impliedVolatility"),
+                    "LTP": pe.get("lastPrice"),
+                    "OI": pe.get("openInterest")
+                })
 
-# ========== FOOTER ==========
-st.markdown("---")
-st.caption(f"⏱️ Last Refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        st.write("📈 Call Options")
+        st.dataframe(pd.DataFrame(ce_data))
+
+        st.write("📉 Put Options")
+        st.dataframe(pd.DataFrame(pe_data))
+    else:
+        st.info("🔄 Could not retrieve option chain data. Try again later.")
