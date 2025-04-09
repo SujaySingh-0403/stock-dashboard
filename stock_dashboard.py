@@ -16,11 +16,11 @@ enable_auto = st.sidebar.checkbox("🔄 Enable Auto Refresh", value=True)
 refresh_interval = st.sidebar.slider("⏱️ Refresh Interval (sec)", 30, 600, 300, step=30)
 
 if st.sidebar.button("🔁 Manual Refresh"):
-    st.experimental_rerun()
+    st.rerun()
 
 if enable_auto:
     time.sleep(refresh_interval)
-    st.experimental_rerun()
+    st.rerun()
 
 # ========== INDEX DATA ==========
 indices = {
