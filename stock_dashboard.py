@@ -46,31 +46,56 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 
-# ========== INDEX TAB ==========
+# ========== TAB 1: INDEX TREND (LIVE NSE DATA) ==========
 with tab1:
-    st.title("📊 Indian Stock Market Dashboard")
-    selected_index_name = st.selectbox("Select Index", list(indices.keys()))
-    selected_index_symbol = indices[selected_index_name]
+    st.subheader("📊 Live Index Trend (from NSE)")
 
-    index_data = yf.Ticker(selected_index_symbol).history(period="3mo", interval="1d")
-    st.subheader(f"{selected_index_name} Trend")
-    st.line_chart(index_data["Close"])
+    index_map = {
+        "NIFTY 50": "NIFTY",
+        "BANKNIFTY": "BANKNIFTY",
+        "FINNIFTY": "FINNIFTY",
+        "MIDCAP": "NIFTY MIDCAP 100",
+        "SENSEX": "SENSEX"
+    }
 
-# ========== FETCH UTILS ==========
-@st.cache_data(ttl=300)
-def fetch_data(symbol, period, interval):
-    ticker = yf.Ticker(f"{symbol}.NS")
-    return ticker.history(period=period, interval=interval)
+    index_choice = st.selectbox("Select Index", list(index_map.keys()))
+    index_symbol = index_map[index_choice]
 
-def add_indicators(df):
-    df["SMA_20"] = ta.trend.sma_indicator(df["Close"], window=20)
-    df["EMA_20"] = ta.trend.ema_indicator(df["Close"], window=20)
-    df["RSI"] = ta.momentum.rsi(df["Close"], window=14)
-    df["MACD"] = ta.trend.macd_diff(df["Close"])
-    bb = ta.volatility.BollingerBands(df["Close"])
-    df["BB_High"] = bb.bollinger_hband()
-    df["BB_Low"] = bb.bollinger_lband()
-    return df
+    def get_nse_index_data(index_symbol="NIFTY"):
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://www.nseindia.com"
+        }
+        session = requests.Session()
+        session.headers.update(headers)
+        session.get("https://www.nseindia.com")
+
+        url = f"https://www.nseindia.com/api/equity-stockIndices?index={index_symbol}"
+        res = session.get(url)
+        data = res.json()
+
+        return data.get("data")[0] if "data" in data and data["data"] else {}
+
+    try:
+        index_data = get_nse_index_data(index_symbol)
+
+        st.markdown(f"### 📈 {index_choice} – Live Snapshot")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Price", f"₹{index_data['lastPrice']}")
+        c2.metric("Change", f"{index_data['change']} ({index_data['percentChange']}%)")
+        c3.metric("Volume", f"{index_data['totalTradedVolume']:,}")
+
+        st.markdown("#### 📌 Additional Stats")
+        st.write(f"🔺 Day High: ₹{index_data['dayHigh']}")
+        st.write(f"🔻 Day Low: ₹{index_data['dayLow']}")
+        st.write(f"📏 52-Week High: ₹{index_data['yearHigh']}")
+        st.write(f"📉 52-Week Low: ₹{index_data['yearLow']}")
+        st.write(f"📊 PE Ratio: {index_data.get('pe', 'N/A')} | PB Ratio: {index_data.get('pb', 'N/A')}")
+        st.write(f"💰 Dividend Yield: {index_data.get('divYield', 'N/A')}")
+
+    except Exception as e:
+        st.error(f"❌ Failed to fetch NSE Index data: {e}")
+
 
 # ========== WATCHLIST TAB ==========
 with tab2:
