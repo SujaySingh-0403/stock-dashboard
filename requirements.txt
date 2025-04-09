@@ -1,8 +1,8 @@
-streamlit>=1.31.0
+streamlit>=1.32.0
 pandas>=1.5.0
-yfinance>=0.2.18
-ta>=0.11.0
+yfinance>=0.2.36
 plotly>=5.18.0
-requests>=2.31.0
 beautifulsoup4>=4.12.2
+requests>=2.31.0
+ta>=0.11.0
 lxml>=4.9.3
