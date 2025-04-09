@@ -1,10 +1,14 @@
+# === stock_dashboard.py ===
+
 import streamlit as st
 import pandas as pd
 import yfinance as yf
 import ta
 import plotly.graph_objects as go
+import requests
 import time
 from datetime import datetime
+from bs4 import BeautifulSoup
 
 # ========== CONFIG ==========
 st.set_page_config(page_title="📊 Indian Stock Market Dashboard", layout="wide")
@@ -17,7 +21,6 @@ refresh_interval = st.sidebar.slider("⏱️ Refresh Interval (sec)", 30, 600, 3
 
 if st.sidebar.button("🔁 Manual Refresh"):
     st.rerun()
-
 if enable_auto:
     time.sleep(refresh_interval)
     st.rerun()
@@ -37,17 +40,16 @@ indices = {
 # ========== MAIN UI ==========
 tab1, tab2, tab3 = st.tabs(["📊 Index Trend", "📈 Watchlist", "📘 F&O Overview"])
 
-# ========== INDEX TAB ==========
+# === TAB 1: INDEX TREND ===
 with tab1:
     st.title("📊 Indian Stock Market Dashboard")
     selected_index_name = st.selectbox("Select Index", list(indices.keys()))
     selected_index_symbol = indices[selected_index_name]
-
     index_data = yf.Ticker(selected_index_symbol).history(period="3mo", interval="1d")
     st.subheader(f"{selected_index_name} Trend")
     st.line_chart(index_data["Close"])
 
-# ========== FETCH UTILS ==========
+# === UTILS ===
 @st.cache_data(ttl=300)
 def fetch_data(symbol, period, interval):
     ticker = yf.Ticker(f"{symbol}.NS")
@@ -63,7 +65,7 @@ def add_indicators(df):
     df["BB_Low"] = bb.bollinger_lband()
     return df
 
-# ========== WATCHLIST TAB ==========
+# === TAB 2: WATCHLIST ===
 with tab2:
     st.subheader("📈 Stock Watchlist")
 
@@ -72,7 +74,7 @@ with tab2:
 
     col1, col2 = st.columns(2)
     with col1:
-        period = st.selectbox("Select Period", ["1mo", "3mo", "6mo", "1y", "2y"], index=1)
+        period = st.selectbox("Select Period", ["1mo", "3mo", "6mo", "1y"], index=1)
     with col2:
         interval = st.selectbox("Select Interval", ["1d", "1h", "15m"], index=0)
 
@@ -83,7 +85,6 @@ with tab2:
             if df.empty:
                 st.warning(f"No data for {symbol}")
                 continue
-
             df = add_indicators(df)
             latest = df.iloc[-1]
 
@@ -93,48 +94,111 @@ with tab2:
             c3.metric("Day Low", f"₹{latest['Low']:.2f}")
             c4.metric("Volume", f"{latest['Volume']:,}")
 
-            # Alerts
             if latest['RSI'] > 70:
                 st.warning(f"🚨 RSI Overbought: {latest['RSI']:.2f}")
             elif latest['RSI'] < 30:
                 st.success(f"📉 RSI Oversold: {latest['RSI']:.2f}")
 
-            if latest["MACD"] > 0 and df["MACD"].iloc[-2] < 0:
-                st.info("📈 MACD Bullish Crossover Detected")
-            elif latest["MACD"] < 0 and df["MACD"].iloc[-2] > 0:
-                st.error("📉 MACD Bearish Crossover Detected")
-
-            # Candlestick + Bollinger
             st.markdown("#### 🕯️ Candlestick with Bollinger Bands")
             fig = go.Figure(data=[
-                go.Candlestick(
-                    x=df.index, open=df["Open"], high=df["High"],
-                    low=df["Low"], close=df["Close"], name="Price"
-                ),
+                go.Candlestick(x=df.index, open=df["Open"], high=df["High"],
+                               low=df["Low"], close=df["Close"], name="Price"),
                 go.Scatter(x=df.index, y=df["BB_High"], line=dict(color="blue", width=1), name="BB High"),
                 go.Scatter(x=df.index, y=df["BB_Low"], line=dict(color="blue", width=1), name="BB Low"),
             ])
             st.plotly_chart(fig, use_container_width=True)
 
-            # Price + MA
             st.line_chart(df[["Close", "SMA_20", "EMA_20"]].dropna())
             st.markdown("##### ⚡ RSI")
             st.line_chart(df[["RSI"]].dropna())
             st.markdown("##### ⚙️ MACD")
             st.line_chart(df[["MACD"]].dropna())
 
-            # Download
             csv = df.to_csv().encode("utf-8")
             st.download_button("📥 Download CSV", csv, file_name=f"{symbol}_data.csv", mime="text/csv")
 
         except Exception as e:
             st.error(f"❌ Error loading {symbol}: {e}")
 
-# ========== F&O OVERVIEW TAB ==========
+# === TAB 3: F&O OVERVIEW ===
 with tab3:
-    st.subheader("📘 F&O Data (Coming Soon)")
-    st.info("Option Chain, IV, OI Analysis, Strategy Builder – under development.")
+    st.subheader("📘 F&O Option Chain with Live Greeks")
 
-# ========== FOOTER ==========
-st.markdown("---")
-st.caption(f"⏱️ Last Refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    symbol = st.selectbox("Select Symbol", ["NIFTY", "BANKNIFTY"])
+    data_source = st.radio("Select Data Source", ["NSE", "StockMock"], index=0)
+
+    @st.cache_data(ttl=300)
+    def fetch_expiry_dates(symbol, source):
+        if source == "NSE":
+            url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
+            headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+            res = requests.get(url, headers=headers)
+            if res.status_code == 200:
+                return res.json()["records"]["expiryDates"]
+        elif source == "StockMock":
+            url = f"https://www.stockmock.in/option-chain/{symbol}"
+            res = requests.get(url)
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.content, "html.parser")
+                return [opt.text for opt in soup.find_all("option", {"class": "expiry-dates"})]
+        return []
+
+    expiry_dates = fetch_expiry_dates(symbol, data_source)
+    expiry = st.selectbox("Select Expiry Date", expiry_dates)
+
+    @st.cache_data(ttl=300)
+    def fetch_option_chain(symbol, expiry, source):
+        if source == "NSE":
+            url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
+            headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+            res = requests.get(url, headers=headers)
+            if res.status_code == 200:
+                data = res.json()["records"]["data"]
+                chain = []
+                for d in data:
+                    if d["expiryDate"] == expiry:
+                        strike = d["strikePrice"]
+                        ce = d.get("CE", {})
+                        pe = d.get("PE", {})
+                        chain.append({
+                            "Strike": strike,
+                            "CE_LTP": ce.get("lastPrice"), "CE_IV": ce.get("impliedVolatility"),
+                            "CE_OI": ce.get("openInterest"), "CE_Change_OI": ce.get("changeinOpenInterest"),
+                            "PE_LTP": pe.get("lastPrice"), "PE_IV": pe.get("impliedVolatility"),
+                            "PE_OI": pe.get("openInterest"), "PE_Change_OI": pe.get("changeinOpenInterest")
+                        })
+                return pd.DataFrame(chain)
+        elif source == "StockMock":
+            url = f"https://www.stockmock.in/option-chain/{symbol}/{expiry}"
+            res = requests.get(url)
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.content, "html.parser")
+                table = soup.find("table", {"id": "option-chain-table"})
+                return pd.read_html(str(table))[0]
+        return pd.DataFrame()
+
+    option_chain = fetch_option_chain(symbol, expiry, data_source)
+    if not option_chain.empty:
+        st.success("✅ Option Chain Loaded")
+        try:
+            spot = option_chain["Strike"].iloc[(option_chain["Strike"] - option_chain["CE_LTP"]).abs().argsort()[:1]].values[0]
+        except:
+            spot = option_chain["Strike"].median()
+        strike_range = st.slider("ATM ± Strikes", 1, 10, 5)
+        filtered = option_chain[(option_chain["Strike"] >= spot - strike_range*50) & (option_chain["Strike"] <= spot + strike_range*50)]
+
+        def highlight(val, col):
+            if col in ["CE_IV", "PE_IV"] and isinstance(val, (int, float)) and val > 30:
+                return 'background-color: yellow'
+            if col == "Strike" and val == spot:
+                return 'background-color: lightblue'
+            return ''
+
+        st.dataframe(
+            filtered.style.applymap(lambda val: highlight(val, "CE_IV"), subset=["CE_IV"])
+                            .applymap(lambda val: highlight(val, "PE_IV"), subset=["PE_IV"])
+                            .applymap(lambda val: highlight(val, "Strike"), subset=["Strike"]),
+            use_container_width=True
+        )
+
+    st.caption(f"Data Source: {data_source} | Last Refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
