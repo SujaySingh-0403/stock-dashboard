@@ -19,7 +19,7 @@ st.title("📊 Indian Stock Market Dashboard")
 with st.sidebar:
     st.header("🔁 Auto Refresh")
     refresh_rate = st.slider("Refresh interval (seconds)", 10, 300, 60)
-    st.caption("⏱️ Refreshes on interval using browser reload")
+    st.caption("⏱️ Refreshes using browser reload")
 
 # === AUTO REFRESH ===
 st.markdown(
@@ -53,7 +53,7 @@ with tab1:
     df = yf.download(index_symbol, period="3mo", interval="1d")
     st.line_chart(df['Close'])
 
-# === TAB 2: WATCHLIST ===
+# === TAB 2: WATCHLIST + TECHNICALS ===
 with tab2:
     st.subheader("📘 Watchlist + Technical Indicators")
     watchlist_input = st.text_input("Enter NSE stock symbols (comma separated)", "RELIANCE, TCS, INFY")
@@ -73,7 +73,7 @@ with tab2:
             macd = MACD(data['Close'])
             data['MACD'] = macd.macd()
 
-            # Plotting
+            # ✅ FIXED 1D PLOTTING
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=data.index, y=data['Close'], name='Close'))
             fig.add_trace(go.Scatter(x=data.index, y=data['SMA'], name='SMA20'))
@@ -86,7 +86,7 @@ with tab2:
         else:
             st.warning(f"No data for {stock}")
 
-# === TAB 3: F&O OVERVIEW ===
+# === TAB 3: F&O OPTION CHAIN ===
 with tab3:
     st.subheader("📘 F&O Option Chain with Live Greeks")
 
@@ -152,7 +152,7 @@ with tab3:
                 res = requests.get(url)
                 soup = BeautifulSoup(res.content, "html.parser")
                 table = soup.find("table", {"id": "option-chain-table"})
-                return pd.read_html(StringIO(str(table)))[0]  # ✅ Fixed deprecation warning
+                return pd.read_html(StringIO(str(table)))[0]  # ✅ FIXED using StringIO
             except Exception:
                 return pd.DataFrame()
         return pd.DataFrame()
@@ -160,10 +160,12 @@ with tab3:
     option_chain = fetch_option_chain(symbol, expiry, data_source)
     if not option_chain.empty:
         st.success("✅ Option Chain Loaded")
+
         try:
             spot = option_chain["Strike"].iloc[(option_chain["Strike"] - option_chain["CE_LTP"]).abs().argsort()[:1]].values[0]
         except:
             spot = option_chain["Strike"].median()
+
         strike_range = st.slider("ATM ± Strikes", 1, 10, 5)
         filtered = option_chain[(option_chain["Strike"] >= spot - strike_range*50) & (option_chain["Strike"] <= spot + strike_range*50)]
 
@@ -175,9 +177,10 @@ with tab3:
             return ''
 
         st.dataframe(
-            filtered.style.applymap(lambda val: highlight(val, "CE_IV"), subset=["CE_IV"])
-                            .applymap(lambda val: highlight(val, "PE_IV"), subset=["PE_IV"])
-                            .applymap(lambda val: highlight(val, "Strike"), subset=["Strike"]),
+            filtered.style
+            .applymap(lambda val: highlight(val, "CE_IV"), subset=["CE_IV"])
+            .applymap(lambda val: highlight(val, "PE_IV"), subset=["PE_IV"])
+            .applymap(lambda val: highlight(val, "Strike"), subset=["Strike"]),
             use_container_width=True
         )
 
