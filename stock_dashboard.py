@@ -124,83 +124,85 @@ with tab2:
 with tab3:
     st.subheader("📘 F&O Option Chain with Live Greeks")
 
-    index_choices = [
-        "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX",
-        "NIFTYIT", "NIFTYAUTO", "NIFTYFMCG", "NIFTYMETAL", "NIFTYPHARMA"
+    # List of available indices for F&O
+    indices_for_fo = [
+        "NIFTY", "BANKNIFTY", "NIFTY IT", "NIFTY FMCG", "NIFTY AUTO", 
+        "NIFTY METAL", "NIFTY PHARMA", "SENSEX", "NIFTY FIN SERVICE"
     ]
-    symbol = st.selectbox("Select Index Symbol", index_choices)
+    
+    # Select index from the available list
+    symbol = st.selectbox("Select Index", indices_for_fo)
+    
+    # Source toggle for data (NSE or StockMock)
     data_source = st.radio("Select Data Source", ["NSE", "StockMock"], index=0)
 
+    # Fetch Expiry Dates based on symbol and source
     @st.cache_data(ttl=300)
     def fetch_expiry_dates(symbol, source):
         if source == "NSE":
-            try:
-                url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
-                headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
-                res = requests.get(url, headers=headers, timeout=5)
-                if res.status_code == 200:
-                    return res.json()["records"]["expiryDates"]
-            except Exception:
-                return []
+            url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
+            headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+            res = requests.get(url, headers=headers)
+            if res.status_code == 200:
+                return res.json()["records"]["expiryDates"]
         elif source == "StockMock":
-            try:
-                url = f"https://www.stockmock.in/option-chain/{symbol}"
-                res = requests.get(url, timeout=5)
+            url = f"https://www.stockmock.in/option-chain/{symbol}"
+            res = requests.get(url)
+            if res.status_code == 200:
                 soup = BeautifulSoup(res.content, "html.parser")
                 return [opt.text for opt in soup.find_all("option", {"class": "expiry-dates"})]
-            except Exception:
-                return []
         return []
 
+    # Get expiry dates
     expiry_dates = fetch_expiry_dates(symbol, data_source)
-    expiry = st.selectbox("Select Expiry Date", expiry_dates) if expiry_dates else "NA"
+    expiry = st.selectbox("Select Expiry Date", expiry_dates)
 
+    # Fetch Option Chain data based on selected symbol, expiry, and source
     @st.cache_data(ttl=300)
     def fetch_option_chain(symbol, expiry, source):
         if source == "NSE":
-            try:
-                url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
-                headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
-                res = requests.get(url, headers=headers, timeout=5)
-                if res.status_code == 200:
-                    data = res.json()["records"]["data"]
-                    chain = []
-                    for d in data:
-                        if d["expiryDate"] == expiry:
-                            strike = d["strikePrice"]
-                            ce = d.get("CE", {})
-                            pe = d.get("PE", {})
-                            chain.append({
-                                "Strike": strike,
-                                "CE_LTP": ce.get("lastPrice"), "CE_IV": ce.get("impliedVolatility"),
-                                "CE_OI": ce.get("openInterest"), "CE_Change_OI": ce.get("changeinOpenInterest"),
-                                "PE_LTP": pe.get("lastPrice"), "PE_IV": pe.get("impliedVolatility"),
-                                "PE_OI": pe.get("openInterest"), "PE_Change_OI": pe.get("changeinOpenInterest")
-                            })
-                    return pd.DataFrame(chain)
-            except Exception:
-                return pd.DataFrame()
+            url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
+            headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+            res = requests.get(url, headers=headers)
+            if res.status_code == 200:
+                data = res.json()["records"]["data"]
+                chain = []
+                for d in data:
+                    if d["expiryDate"] == expiry:
+                        strike = d["strikePrice"]
+                        ce = d.get("CE", {})
+                        pe = d.get("PE", {})
+                        chain.append({
+                            "Strike": strike,
+                            "CE_LTP": ce.get("lastPrice"), "CE_IV": ce.get("impliedVolatility"),
+                            "CE_OI": ce.get("openInterest"), "CE_Change_OI": ce.get("changeinOpenInterest"),
+                            "PE_LTP": pe.get("lastPrice"), "PE_IV": pe.get("impliedVolatility"),
+                            "PE_OI": pe.get("openInterest"), "PE_Change_OI": pe.get("changeinOpenInterest")
+                        })
+                return pd.DataFrame(chain)
         elif source == "StockMock":
-            try:
-                url = f"https://www.stockmock.in/option-chain/{symbol}/{expiry}"
-                res = requests.get(url)
+            url = f"https://www.stockmock.in/option-chain/{symbol}/{expiry}"
+            res = requests.get(url)
+            if res.status_code == 200:
                 soup = BeautifulSoup(res.content, "html.parser")
                 table = soup.find("table", {"id": "option-chain-table"})
                 return pd.read_html(str(table))[0]
-            except Exception:
-                return pd.DataFrame()
         return pd.DataFrame()
 
+    # Fetch the option chain data
     option_chain = fetch_option_chain(symbol, expiry, data_source)
+    
     if not option_chain.empty:
         st.success("✅ Option Chain Loaded")
+        
         try:
             spot = option_chain["Strike"].iloc[(option_chain["Strike"] - option_chain["CE_LTP"]).abs().argsort()[:1]].values[0]
         except:
             spot = option_chain["Strike"].median()
+        
         strike_range = st.slider("ATM ± Strikes", 1, 10, 5)
         filtered = option_chain[(option_chain["Strike"] >= spot - strike_range*50) & (option_chain["Strike"] <= spot + strike_range*50)]
-
+        
         def highlight(val, col):
             if col in ["CE_IV", "PE_IV"] and isinstance(val, (int, float)) and val > 30:
                 return 'background-color: yellow'
@@ -216,3 +218,4 @@ with tab3:
         )
 
     st.caption(f"Data Source: {data_source} | Last Refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
