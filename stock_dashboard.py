@@ -8,7 +8,6 @@ import numpy as np
 import math
 from streamlit_autorefresh import st_autorefresh
 
-
 st.set_page_config(page_title="📈 Stock Market Dashboard", layout="wide")
 st.title("📊 Live Indian Stock Market Dashboard")
 
@@ -32,7 +31,7 @@ period = st.sidebar.selectbox("📆 Data Period", ["1d", "5d", "1mo", "3mo", "6m
 interval = st.sidebar.selectbox("⏱️ Interval", ["1m", "5m", "15m", "30m", "1h", "1d"], index=4)
 refresh_sec = st.sidebar.slider("🔄 Auto Refresh (seconds)", 0, 300, 0, step=10)
 if refresh_sec > 0:
-    count = st_autorefresh(interval=refresh_sec * 1000, key="auto_refresh")
+    st_autorefresh(interval=refresh_sec * 1000, key="auto_refresh")
 
 # ----------- Tabs -----------
 tab1, tab2, tab3 = st.tabs(["📈 Index Overview", "📊 Stock Watchlist", "📘 F&O Overview"])
@@ -47,8 +46,9 @@ def fetch_data(symbol, period, interval):
 @st.cache_data(ttl=300)
 def add_indicators(df):
     df['MA20'] = df['Close'].rolling(window=20).mean()
-    df['Upper'] = df['MA20'] + 2 * df['Close'].rolling(window=20).std()
-    df['Lower'] = df['MA20'] - 2 * df['Close'].rolling(window=20).std()
+    std_dev = df['Close'].rolling(window=20).std()
+    df['Upper'] = df['MA20'] + 2 * std_dev
+    df['Lower'] = df['MA20'] - 2 * std_dev
     return df
 
 @st.cache_data(ttl=300)
