@@ -124,129 +124,69 @@ with tab2:
 with tab3:
     st.subheader("📘 F&O Option Chain with Live Greeks")
 
-    # List of available indices for F&O
-    indices_for_fo = [
-        "NIFTY", "BANKNIFTY", "NIFTY IT", "NIFTY FMCG", "NIFTY AUTO", 
-        "NIFTY METAL", "NIFTY PHARMA", "SENSEX", "NIFTY FIN SERVICE"
-    ]
-    
-    # Select index from the available list
-    symbol = st.selectbox("Select Index", indices_for_fo)
-    
-    # Source toggle for data (NSE or StockMock)
+    symbol = st.selectbox("Select Symbol", ["NIFTY", "BANKNIFTY"])
     data_source = st.radio("Select Data Source", ["NSE", "StockMock"], index=0)
 
-import requests
-from bs4 import BeautifulSoup
-
-# Fetch Expiry Dates based on symbol and source with enhanced headers
-@st.cache_data(ttl=300)
-def fetch_expiry_dates(symbol, source):
-    try:
+    @st.cache_data(ttl=300)
+    def fetch_expiry_dates(symbol, source):
         if source == "NSE":
             url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
-            
-            # Enhanced headers to simulate a browser request
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                "Accept": "application/json",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Connection": "keep-alive",
-                "Cache-Control": "max-age=0",
-                "TE": "Trailers"
-            }
-            
-            # Create a session to handle cookies
-            session = requests.Session()
-            session.headers.update(headers)
-            res = session.get(url)
-            
-            # Ensure we handle failed requests
-            res.raise_for_status()  # Raise error for bad responses
-            return res.json()["records"]["expiryDates"]
-
+            headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+            res = requests.get(url, headers=headers)
+            if res.status_code == 200:
+                return res.json()["records"]["expiryDates"]
         elif source == "StockMock":
             url = f"https://www.stockmock.in/option-chain/{symbol}"
             res = requests.get(url)
-            res.raise_for_status()  # Check for request errors
-            soup = BeautifulSoup(res.content, "html.parser")
-            return [opt.text for opt in soup.find_all("option", {"class": "expiry-dates"})]
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.content, "html.parser")
+                return [opt.text for opt in soup.find_all("option", {"class": "expiry-dates"})]
+        return []
 
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error fetching expiry dates: {e}")
-    except KeyError:
-        st.error(f"Failed to parse expiry dates for {symbol}.")
-    return []
-
-
-    # Get expiry dates
     expiry_dates = fetch_expiry_dates(symbol, data_source)
-    if not expiry_dates:
-        st.warning("No expiry dates found.")
     expiry = st.selectbox("Select Expiry Date", expiry_dates)
 
-    # Fetch Option Chain data based on selected symbol, expiry, and source
     @st.cache_data(ttl=300)
     def fetch_option_chain(symbol, expiry, source):
-        try:
-            if source == "NSE":
-                url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
-                headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
-                res = requests.get(url, headers=headers)
-                res.raise_for_status()  # Check for request errors
-                data = res.json().get("records", {}).get("data", [])
-                if not data:
-                    st.warning(f"No data found for {symbol} on expiry {expiry}.")
-                    return pd.DataFrame()
-
+        if source == "NSE":
+            url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
+            headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+            res = requests.get(url, headers=headers)
+            if res.status_code == 200:
+                data = res.json()["records"]["data"]
                 chain = []
                 for d in data:
-                    if d.get("expiryDate") == expiry:
-                        strike = d.get("strikePrice")
+                    if d["expiryDate"] == expiry:
+                        strike = d["strikePrice"]
                         ce = d.get("CE", {})
                         pe = d.get("PE", {})
                         chain.append({
                             "Strike": strike,
-                            "CE_LTP": ce.get("lastPrice"),
-                            "CE_IV": ce.get("impliedVolatility"),
-                            "CE_OI": ce.get("openInterest"),
-                            "CE_Change_OI": ce.get("changeinOpenInterest"),
-                            "PE_LTP": pe.get("lastPrice"),
-                            "PE_IV": pe.get("impliedVolatility"),
-                            "PE_OI": pe.get("openInterest"),
-                            "PE_Change_OI": pe.get("changeinOpenInterest")
+                            "CE_LTP": ce.get("lastPrice"), "CE_IV": ce.get("impliedVolatility"),
+                            "CE_OI": ce.get("openInterest"), "CE_Change_OI": ce.get("changeinOpenInterest"),
+                            "PE_LTP": pe.get("lastPrice"), "PE_IV": pe.get("impliedVolatility"),
+                            "PE_OI": pe.get("openInterest"), "PE_Change_OI": pe.get("changeinOpenInterest")
                         })
                 return pd.DataFrame(chain)
-            
-            elif source == "StockMock":
-                url = f"https://www.stockmock.in/option-chain/{symbol}/{expiry}"
-                res = requests.get(url)
-                res.raise_for_status()  # Check for request errors
+        elif source == "StockMock":
+            url = f"https://www.stockmock.in/option-chain/{symbol}/{expiry}"
+            res = requests.get(url)
+            if res.status_code == 200:
                 soup = BeautifulSoup(res.content, "html.parser")
                 table = soup.find("table", {"id": "option-chain-table"})
-                if not table:
-                    st.warning(f"No data found for {symbol} on expiry {expiry}.")
-                    return pd.DataFrame()
                 return pd.read_html(str(table))[0]
-        except Exception as e:
-            st.error(f"Error fetching option chain: {e}")
         return pd.DataFrame()
 
-    # Fetch the option chain data
     option_chain = fetch_option_chain(symbol, expiry, data_source)
-    
     if not option_chain.empty:
         st.success("✅ Option Chain Loaded")
-        
         try:
             spot = option_chain["Strike"].iloc[(option_chain["Strike"] - option_chain["CE_LTP"]).abs().argsort()[:1]].values[0]
         except:
             spot = option_chain["Strike"].median()
-
         strike_range = st.slider("ATM ± Strikes", 1, 10, 5)
         filtered = option_chain[(option_chain["Strike"] >= spot - strike_range*50) & (option_chain["Strike"] <= spot + strike_range*50)]
-        
-        # Highlight function for specific conditions
+
         def highlight(val, col):
             if col in ["CE_IV", "PE_IV"] and isinstance(val, (int, float)) and val > 30:
                 return 'background-color: yellow'
@@ -254,11 +194,11 @@ def fetch_expiry_dates(symbol, source):
                 return 'background-color: lightblue'
             return ''
 
-        # Apply the highlight using Styler.map
-        styled_df = filtered.style.applymap(lambda val: highlight(val, "CE_IV"), subset=["CE_IV"]) \
-                                 .applymap(lambda val: highlight(val, "PE_IV"), subset=["PE_IV"]) \
-                                 .applymap(lambda val: highlight(val, "Strike"), subset=["Strike"])
-
-        st.dataframe(styled_df, use_container_width=True)
+        st.dataframe(
+            filtered.style.applymap(lambda val: highlight(val, "CE_IV"), subset=["CE_IV"])
+                            .applymap(lambda val: highlight(val, "PE_IV"), subset=["PE_IV"])
+                            .applymap(lambda val: highlight(val, "Strike"), subset=["Strike"]),
+            use_container_width=True
+        )
 
     st.caption(f"Data Source: {data_source} | Last Refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
