@@ -1,6 +1,5 @@
-# Build the enhanced stock_dashboard.py with user-configurable indicator settings
 
-enhanced_dashboard_code = """"
+
 # === stock_dashboard.py ===
 
 import streamlit as st
@@ -58,13 +57,12 @@ def fetch_data(symbol, period, interval):
     ticker = yf.Ticker(f"{symbol}.NS")
     return ticker.history(period=period, interval=interval)
 
-def add_indicators(df, rsi_period, macd_fast, macd_slow, macd_signal, ma_window, bb_window, bb_std):
-    df["SMA"] = ta.trend.sma_indicator(df["Close"], window=ma_window)
-    df["EMA"] = ta.trend.ema_indicator(df["Close"], window=ma_window)
-    df["RSI"] = ta.momentum.rsi(df["Close"], window=rsi_period)
-    macd = ta.trend.macd(df["Close"], window_fast=macd_fast, window_slow=macd_slow, window_sign=macd_signal)
-    df["MACD"] = macd - ta.trend.macd_signal(df["Close"], window_fast=macd_fast, window_slow=macd_slow, window_sign=macd_signal)
-    bb = ta.volatility.BollingerBands(df["Close"], window=bb_window, window_dev=bb_std)
+def add_indicators(df):
+    df["SMA_20"] = ta.trend.sma_indicator(df["Close"], window=20)
+    df["EMA_20"] = ta.trend.ema_indicator(df["Close"], window=20)
+    df["RSI"] = ta.momentum.rsi(df["Close"], window=14)
+    df["MACD"] = ta.trend.macd_diff(df["Close"])
+    bb = ta.volatility.BollingerBands(df["Close"])
     df["BB_High"] = bb.bollinger_hband()
     df["BB_Low"] = bb.bollinger_lband()
     return df
@@ -82,22 +80,10 @@ with tab2:
     with col2:
         interval = st.selectbox("Select Interval", ["1d", "1h", "15m"], index=0)
 
-    st.markdown("### 🎛️ Indicator Settings")
-
     show_rsi = st.checkbox("📉 Show RSI", value=True)
-    rsi_period = st.slider("RSI Period", 5, 30, 14)
-
     show_macd = st.checkbox("📊 Show MACD", value=True)
-    macd_fast = st.slider("MACD Fast Period", 5, 20, 12)
-    macd_slow = st.slider("MACD Slow Period", 10, 30, 26)
-    macd_signal = st.slider("MACD Signal Period", 5, 15, 9)
-
     show_bb = st.checkbox("📦 Show Bollinger Bands", value=True)
-    bb_window = st.slider("BB Window", 10, 30, 20)
-    bb_std = st.slider("BB Std Dev", 1, 3, 2)
-
     show_ma = st.checkbox("🧮 Show SMA & EMA", value=True)
-    ma_window = st.slider("MA Window", 10, 50, 20)
 
     for symbol in symbols:
         st.markdown(f"---\n### 📌 {symbol} – Technical Overview")
@@ -106,7 +92,7 @@ with tab2:
             if df.empty:
                 st.warning(f"No data for {symbol}")
                 continue
-            df = add_indicators(df, rsi_period, macd_fast, macd_slow, macd_signal, ma_window, bb_window, bb_std)
+            df = add_indicators(df)
             latest = df.iloc[-1]
 
             c1, c2, c3, c4 = st.columns(4)
@@ -127,9 +113,9 @@ with tab2:
                 fig.add_trace(go.Scatter(x=df.index, y=df["BB_Low"], name="BB Low",
                                          line=dict(color="blue", width=1)))
             if show_ma:
-                fig.add_trace(go.Scatter(x=df.index, y=df["SMA"], name="SMA",
+                fig.add_trace(go.Scatter(x=df.index, y=df["SMA_20"], name="SMA 20",
                                          line=dict(color="orange")))
-                fig.add_trace(go.Scatter(x=df.index, y=df["EMA"], name="EMA",
+                fig.add_trace(go.Scatter(x=df.index, y=df["EMA_20"], name="EMA 20",
                                          line=dict(color="green")))
             fig.update_layout(title=f"{symbol} - Price with Indicators", xaxis_rangeslider_visible=False)
             st.plotly_chart(fig, use_container_width=True)
