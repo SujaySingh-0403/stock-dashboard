@@ -1,6 +1,6 @@
-# Build the enhanced stock_dashboard.py with user-configurable indicator settings
+# Rewriting the corrected stock_dashboard.py without unterminated string
 
-enhanced_dashboard_code = """
+fixed_dashboard_code = """
 # === stock_dashboard.py ===
 
 import streamlit as st
@@ -147,7 +147,6 @@ with tab2:
 
         except Exception as e:
             st.error(f"❌ Error loading {symbol}: {e}")
-
 
 # === TAB 3: F&O OVERVIEW ===
 with tab3:
