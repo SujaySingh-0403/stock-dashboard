@@ -1,8 +1,3 @@
-# Rewriting the corrected stock_dashboard.py without unterminated string
-
-fixed_dashboard_code = """
-# === stock_dashboard.py ===
-
 import streamlit as st
 import pandas as pd
 import yfinance as yf
@@ -148,85 +143,52 @@ with tab2:
         except Exception as e:
             st.error(f"❌ Error loading {symbol}: {e}")
 
-# === TAB 3: F&O OVERVIEW ===
+# === TAB 3: F&O Option Chain with Source Toggle ===
 with tab3:
-    st.subheader("📘 F&O Option Chain with Live Greeks")
+    st.header("📘 F&O Option Chain")
 
-    symbol = st.selectbox("Select Symbol", ["NIFTY", "BANKNIFTY"])
-    data_source = st.radio("Select Data Source", ["NSE", "StockMock"], index=0)
+    fo_symbol = st.text_input("Enter F&O Symbol (e.g. NIFTY, BANKNIFTY)", "NIFTY")
+    source_toggle = st.radio("Select Data Source", ["StockMock", "NSE"], horizontal=True)
 
-    @st.cache_data(ttl=300)
-    def fetch_expiry_dates(symbol, source):
-        if source == "NSE":
-            url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
-            headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
-            res = requests.get(url, headers=headers)
-            if res.status_code == 200:
-                return res.json()["records"]["expiryDates"]
-        elif source == "StockMock":
-            url = f"https://www.stockmock.in/option-chain/{symbol}"
-            res = requests.get(url)
-            if res.status_code == 200:
-                soup = BeautifulSoup(res.content, "html.parser")
-                return [opt.text for opt in soup.find_all("option", {"class": "expiry-dates"})]
-        return []
-
-    expiry_dates = fetch_expiry_dates(symbol, data_source)
-    expiry = st.selectbox("Select Expiry Date", expiry_dates)
-
-    @st.cache_data(ttl=300)
-    def fetch_option_chain(symbol, expiry, source):
-        if source == "NSE":
-            url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
-            headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
-            res = requests.get(url, headers=headers)
-            if res.status_code == 200:
-                data = res.json()["records"]["data"]
-                chain = []
-                for d in data:
-                    if d["expiryDate"] == expiry:
-                        strike = d["strikePrice"]
-                        ce = d.get("CE", {})
-                        pe = d.get("PE", {})
-                        chain.append({
-                            "Strike": strike,
-                            "CE_LTP": ce.get("lastPrice"), "CE_IV": ce.get("impliedVolatility"),
-                            "CE_OI": ce.get("openInterest"), "CE_Change_OI": ce.get("changeinOpenInterest"),
-                            "PE_LTP": pe.get("lastPrice"), "PE_IV": pe.get("impliedVolatility"),
-                            "PE_OI": pe.get("openInterest"), "PE_Change_OI": pe.get("changeinOpenInterest")
-                        })
-                return pd.DataFrame(chain)
-        elif source == "StockMock":
-            url = f"https://www.stockmock.in/option-chain/{symbol}/{expiry}"
-            res = requests.get(url)
-            if res.status_code == 200:
-                soup = BeautifulSoup(res.content, "html.parser")
-                table = soup.find("table", {"id": "option-chain-table"})
-                return pd.read_html(str(table))[0]
-        return pd.DataFrame()
-
-    option_chain = fetch_option_chain(symbol, expiry, data_source)
-    if not option_chain.empty:
-        st.success("✅ Option Chain Loaded")
+    def fetch_stockmock_option_chain(symbol):
+        url = f"https://www.stockmock.in/option-chain/{symbol.upper()}"
         try:
-            spot = option_chain["Strike"].iloc[(option_chain["Strike"] - option_chain["CE_LTP"]).abs().argsort()[:1]].values[0]
+            res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            soup = BeautifulSoup(res.text, "html.parser")
+            tables = soup.find_all("table")
+            if tables:
+                return pd.read_html(str(tables[0]))[0]
         except:
-            spot = option_chain["Strike"].median()
-        strike_range = st.slider("ATM ± Strikes", 1, 10, 5)
-        filtered = option_chain[(option_chain["Strike"] >= spot - strike_range*50) & (option_chain["Strike"] <= spot + strike_range*50)]
+            return None
 
-        def highlight(val, col):
-            if col in ["CE_IV", "PE_IV"] and isinstance(val, (int, float)) and val > 30:
-                return 'background-color: yellow'
-            if col == "Strike" and val == spot:
-                return 'background-color: lightblue'
-            return ''
+    def fetch_nse_option_chain(symbol):
+        try:
+            url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol.upper()}"
+            headers = {
+                "User-Agent": "Mozilla/5.0",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://www.nseindia.com"
+            }
+            session = requests.Session()
+            session.get("https://www.nseindia.com", headers=headers)
+            response = session.get(url, headers=headers)
+            data = response.json()
+            return pd.json_normalize(data["records"]["data"])
+        except:
+            return None
 
-        st.dataframe(
-            filtered.style.applymap(lambda val: highlight(val, "CE_IV"), subset=["CE_IV"])
-                            .applymap(lambda val: highlight(val, "PE_IV"), subset=["PE_IV"])
-                            .applymap(lambda val: highlight(val, "Strike"), subset=["Strike"]),
-            use_container_width=True
-        )
-
-    st.caption(f"Data Source: {data_source} | Last Refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    if fo_symbol:
+        if source_toggle == "StockMock":
+            st.subheader(f"StockMock Option Chain for {fo_symbol}")
+            stockmock_data = fetch_stockmock_option_chain(fo_symbol)
+            if stockmock_data is not None:
+                st.dataframe(stockmock_data)
+            else:
+                st.warning("⚠️ Could not fetch data from StockMock.")
+        else:
+            st.subheader(f"NSE Option Chain for {fo_symbol}")
+            nse_data = fetch_nse_option_chain(fo_symbol)
+            if nse_data is not None:
+                st.dataframe(nse_data)
+            else:
+                st.warning("⚠️ Could not fetch data from NSE.")
