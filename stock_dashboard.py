@@ -1,6 +1,6 @@
 # Build the enhanced stock_dashboard.py with user-configurable indicator settings
 
-enhanced_dashboard_code = '''
+enhanced_dashboard_code = """
 # === stock_dashboard.py ===
 
 import streamlit as st
