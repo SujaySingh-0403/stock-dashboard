@@ -1,3 +1,6 @@
+
+# === stock_dashboard.py ===
+
 import streamlit as st
 import pandas as pd
 import yfinance as yf
@@ -53,13 +56,12 @@ def fetch_data(symbol, period, interval):
     ticker = yf.Ticker(f"{symbol}.NS")
     return ticker.history(period=period, interval=interval)
 
-def add_indicators(df, rsi_period, macd_fast, macd_slow, macd_signal, ma_window, bb_window, bb_std):
-    df["SMA"] = ta.trend.sma_indicator(df["Close"], window=ma_window)
-    df["EMA"] = ta.trend.ema_indicator(df["Close"], window=ma_window)
-    df["RSI"] = ta.momentum.rsi(df["Close"], window=rsi_period)
-    macd = ta.trend.macd(df["Close"], window_fast=macd_fast, window_slow=macd_slow, window_sign=macd_signal)
-    df["MACD"] = macd - ta.trend.macd_signal(df["Close"], window_fast=macd_fast, window_slow=macd_slow, window_sign=macd_signal)
-    bb = ta.volatility.BollingerBands(df["Close"], window=bb_window, window_dev=bb_std)
+def add_indicators(df):
+    df["SMA_20"] = ta.trend.sma_indicator(df["Close"], window=20)
+    df["EMA_20"] = ta.trend.ema_indicator(df["Close"], window=20)
+    df["RSI"] = ta.momentum.rsi(df["Close"], window=14)
+    df["MACD"] = ta.trend.macd_diff(df["Close"])
+    bb = ta.volatility.BollingerBands(df["Close"])
     df["BB_High"] = bb.bollinger_hband()
     df["BB_Low"] = bb.bollinger_lband()
     return df
@@ -77,22 +79,10 @@ with tab2:
     with col2:
         interval = st.selectbox("Select Interval", ["1d", "1h", "15m"], index=0)
 
-    st.markdown("### 🎛️ Indicator Settings")
-
     show_rsi = st.checkbox("📉 Show RSI", value=True)
-    rsi_period = st.slider("RSI Period", 5, 30, 14)
-
     show_macd = st.checkbox("📊 Show MACD", value=True)
-    macd_fast = st.slider("MACD Fast Period", 5, 20, 12)
-    macd_slow = st.slider("MACD Slow Period", 10, 30, 26)
-    macd_signal = st.slider("MACD Signal Period", 5, 15, 9)
-
     show_bb = st.checkbox("📦 Show Bollinger Bands", value=True)
-    bb_window = st.slider("BB Window", 10, 30, 20)
-    bb_std = st.slider("BB Std Dev", 1, 3, 2)
-
     show_ma = st.checkbox("🧮 Show SMA & EMA", value=True)
-    ma_window = st.slider("MA Window", 10, 50, 20)
 
     for symbol in symbols:
         st.markdown(f"---\n### 📌 {symbol} – Technical Overview")
@@ -101,7 +91,7 @@ with tab2:
             if df.empty:
                 st.warning(f"No data for {symbol}")
                 continue
-            df = add_indicators(df, rsi_period, macd_fast, macd_slow, macd_signal, ma_window, bb_window, bb_std)
+            df = add_indicators(df)
             latest = df.iloc[-1]
 
             c1, c2, c3, c4 = st.columns(4)
@@ -122,9 +112,9 @@ with tab2:
                 fig.add_trace(go.Scatter(x=df.index, y=df["BB_Low"], name="BB Low",
                                          line=dict(color="blue", width=1)))
             if show_ma:
-                fig.add_trace(go.Scatter(x=df.index, y=df["SMA"], name="SMA",
+                fig.add_trace(go.Scatter(x=df.index, y=df["SMA_20"], name="SMA 20",
                                          line=dict(color="orange")))
-                fig.add_trace(go.Scatter(x=df.index, y=df["EMA"], name="EMA",
+                fig.add_trace(go.Scatter(x=df.index, y=df["EMA_20"], name="EMA 20",
                                          line=dict(color="green")))
             fig.update_layout(title=f"{symbol} - Price with Indicators", xaxis_rangeslider_visible=False)
             st.plotly_chart(fig, use_container_width=True)
@@ -143,52 +133,86 @@ with tab2:
         except Exception as e:
             st.error(f"❌ Error loading {symbol}: {e}")
 
-# === TAB 3: F&O Option Chain with Source Toggle ===
+
+# === TAB 3: F&O OVERVIEW ===
 with tab3:
-    st.header("📘 F&O Option Chain")
+    st.subheader("📘 F&O Option Chain with Live Greeks")
 
-    fo_symbol = st.text_input("Enter F&O Symbol (e.g. NIFTY, BANKNIFTY)", "NIFTY")
-    source_toggle = st.radio("Select Data Source", ["StockMock", "NSE"], horizontal=True)
+    symbol = st.selectbox("Select Symbol", ["NIFTY", "BANKNIFTY"])
+    data_source = st.radio("Select Data Source", ["NSE", "StockMock"], index=0)
 
-    def fetch_stockmock_option_chain(symbol):
-        url = f"https://www.stockmock.in/option-chain/{symbol.upper()}"
+    @st.cache_data(ttl=300)
+    def fetch_expiry_dates(symbol, source):
+        if source == "NSE":
+            url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
+            headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+            res = requests.get(url, headers=headers)
+            if res.status_code == 200:
+                return res.json()["records"]["expiryDates"]
+        elif source == "StockMock":
+            url = f"https://www.stockmock.in/option-chain/{symbol}"
+            res = requests.get(url)
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.content, "html.parser")
+                return [opt.text for opt in soup.find_all("option", {"class": "expiry-dates"})]
+        return []
+
+    expiry_dates = fetch_expiry_dates(symbol, data_source)
+    expiry = st.selectbox("Select Expiry Date", expiry_dates)
+
+    @st.cache_data(ttl=300)
+    def fetch_option_chain(symbol, expiry, source):
+        if source == "NSE":
+            url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
+            headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+            res = requests.get(url, headers=headers)
+            if res.status_code == 200:
+                data = res.json()["records"]["data"]
+                chain = []
+                for d in data:
+                    if d["expiryDate"] == expiry:
+                        strike = d["strikePrice"]
+                        ce = d.get("CE", {})
+                        pe = d.get("PE", {})
+                        chain.append({
+                            "Strike": strike,
+                            "CE_LTP": ce.get("lastPrice"), "CE_IV": ce.get("impliedVolatility"),
+                            "CE_OI": ce.get("openInterest"), "CE_Change_OI": ce.get("changeinOpenInterest"),
+                            "PE_LTP": pe.get("lastPrice"), "PE_IV": pe.get("impliedVolatility"),
+                            "PE_OI": pe.get("openInterest"), "PE_Change_OI": pe.get("changeinOpenInterest")
+                        })
+                return pd.DataFrame(chain)
+        elif source == "StockMock":
+            url = f"https://www.stockmock.in/option-chain/{symbol}/{expiry}"
+            res = requests.get(url)
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.content, "html.parser")
+                table = soup.find("table", {"id": "option-chain-table"})
+                return pd.read_html(str(table))[0]
+        return pd.DataFrame()
+
+    option_chain = fetch_option_chain(symbol, expiry, data_source)
+    if not option_chain.empty:
+        st.success("✅ Option Chain Loaded")
         try:
-            res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-            soup = BeautifulSoup(res.text, "html.parser")
-            tables = soup.find_all("table")
-            if tables:
-                return pd.read_html(str(tables[0]))[0]
+            spot = option_chain["Strike"].iloc[(option_chain["Strike"] - option_chain["CE_LTP"]).abs().argsort()[:1]].values[0]
         except:
-            return None
+            spot = option_chain["Strike"].median()
+        strike_range = st.slider("ATM ± Strikes", 1, 10, 5)
+        filtered = option_chain[(option_chain["Strike"] >= spot - strike_range*50) & (option_chain["Strike"] <= spot + strike_range*50)]
 
-    def fetch_nse_option_chain(symbol):
-        try:
-            url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol.upper()}"
-            headers = {
-                "User-Agent": "Mozilla/5.0",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Referer": "https://www.nseindia.com"
-            }
-            session = requests.Session()
-            session.get("https://www.nseindia.com", headers=headers)
-            response = session.get(url, headers=headers)
-            data = response.json()
-            return pd.json_normalize(data["records"]["data"])
-        except:
-            return None
+        def highlight(val, col):
+            if col in ["CE_IV", "PE_IV"] and isinstance(val, (int, float)) and val > 30:
+                return 'background-color: yellow'
+            if col == "Strike" and val == spot:
+                return 'background-color: lightblue'
+            return ''
 
-    if fo_symbol:
-        if source_toggle == "StockMock":
-            st.subheader(f"StockMock Option Chain for {fo_symbol}")
-            stockmock_data = fetch_stockmock_option_chain(fo_symbol)
-            if stockmock_data is not None:
-                st.dataframe(stockmock_data)
-            else:
-                st.warning("⚠️ Could not fetch data from StockMock.")
-        else:
-            st.subheader(f"NSE Option Chain for {fo_symbol}")
-            nse_data = fetch_nse_option_chain(fo_symbol)
-            if nse_data is not None:
-                st.dataframe(nse_data)
-            else:
-                st.warning("⚠️ Could not fetch data from NSE.")
+        st.dataframe(
+            filtered.style.applymap(lambda val: highlight(val, "CE_IV"), subset=["CE_IV"])
+                            .applymap(lambda val: highlight(val, "PE_IV"), subset=["PE_IV"])
+                            .applymap(lambda val: highlight(val, "Strike"), subset=["Strike"]),
+            use_container_width=True
+        )
+
+    st.caption(f"Data Source: {data_source} | Last Refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
